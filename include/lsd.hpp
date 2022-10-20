@@ -50,9 +50,10 @@ class LineDrawer{
     cv::Mat img;
 
   public:
-    void setImg(double* img, int x, int y){
-      cv::Mat cvImg(x, y, CV_64F, img);      
-      cvImg.convertTo(this->img, CV_8UC1);
+    void setImg(unsigned char* img, int x, int y){
+      cv::Mat cvImg(x, y, CV_8UC1, img);      
+      //cvImg.convertTo(this->img, CV_8UC1);
+      this->img = cvImg;
       cv::cvtColor(this->img, this->img, cv::COLOR_GRAY2RGB);
     };
     void setImg(cv::Mat img){
@@ -61,7 +62,7 @@ class LineDrawer{
 
     };
 
-    void draw(const double line[4], std::string str="Window", cv::Scalar color=(0,0,255)){
+    void draw(const float line[4], std::string str="Window", cv::Scalar color=(0,0,255)){
       cv::Mat img_;
       this->img.copyTo(img_);
       cv::line(img_, 
@@ -71,10 +72,10 @@ class LineDrawer{
           2, cv::LINE_AA, 0);
       cv::namedWindow(str, 1 );
       cv::imshow(str, img_);
-      cv::waitKey(10);
+      cv::waitKey(5);
     };
 
-    void draw(const double(*lines)[4], const int n_out, std::string str="window"){
+    void draw(const float(*lines)[4], const int n_out, std::string str="window"){
 
       std::uniform_int_distribution<> rnd(0,255);
       std::random_device rd;
@@ -96,6 +97,41 @@ class LineDrawer{
     };
 };
 #endif
+
+
+/** ln(10) */
+#ifndef M_LN10
+#define M_LN10 2.30258509299404568402f
+#endif /* !M_LN10 */
+
+/** PI */
+#ifndef M_PI
+#define M_PI   3.14159265358979323846f
+#endif /* !M_PI */
+
+#ifndef FALSE
+#define FALSE 0
+#endif /* !FALSE */
+
+#ifndef TRUE
+#define TRUE 1
+#endif /* !TRUE */
+
+/** Label for pixels with undefined gradient. */
+#define NOTDEF -512.0f // -1024.0f
+#define NOTDEF_INT -29335
+
+/** 3/2 pi */
+#define M_3_2_PI 4.71238898038f
+
+/** 2 pi */
+#define M_2__PI  6.28318530718f
+
+/** Label for pixels not used in yet. */
+#define NOTUSED 0
+
+/** Label for pixels already used in detection. */
+#define USED    1
 
 /*----------------------------------------------------------------------------*/
 /** LSD Full Interface
@@ -196,10 +232,10 @@ class LineDrawer{
                        line segment number 'n+1' are obtained with
                        'out[7*n+0]' to 'out[7*n+6]'.
  */
-double * LineSegmentDetection( int * n_out,
-                               double * img, int X, int Y,
-                               double scale, double sigma_scale, double quant,
-                               double ang_th, double log_eps, double density_th,
+float * LineSegmentDetection( int * n_out,
+                               unsigned char* img, int X, int Y,
+                               float scale, float sigma_scale, float quant,
+                               float ang_th, float log_eps, float density_th,
                                int n_bins,
                                int ** reg_img, int * reg_x, int * reg_y );
 
@@ -249,7 +285,7 @@ double * LineSegmentDetection( int * n_out,
                        'reg_img' image, when asked for.
                        Suggested value: NULL
 
-    @return            A double array of size 7 x n_out, containing the list
+    @return            A float array of size 7 x n_out, containing the list
                        of line segments detected. The array contains first
                        7 values of line segment number 1, then the 7 values
                        of line segment number 2, and so on, and it finish
@@ -264,8 +300,8 @@ double * LineSegmentDetection( int * n_out,
                        line segment number 'n+1' are obtained with
                        'out[7*n+0]' to 'out[7*n+6]'.
  */
-double * lsd_scale_region( int * n_out,
-                           double * img, int X, int Y, double scale,
+float * lsd_scale_region( int * n_out,
+                           unsigned char * img, int X, int Y, float scale,
                            int ** reg_img, int * reg_x, int * reg_y );
 
 /*----------------------------------------------------------------------------*/
@@ -275,7 +311,7 @@ double * lsd_scale_region( int * n_out,
                        line segments detected.
 
     @param img         Pointer to input image data. It must be an array of
-                       doubles of size X x Y, and the pixel at coordinates
+                       floats of size X x Y, and the pixel at coordinates
                        (x,y) is obtained by img[x+y*X].
 
     @param X           X size of the image: the number of columns.
@@ -290,7 +326,7 @@ double * lsd_scale_region( int * n_out,
                        is applied.
                        Suggested value: 0.8
 
-    @return            A double array of size 7 x n_out, containing the list
+    @return            A float array of size 7 x n_out, containing the list
                        of line segments detected. The array contains first
                        7 values of line segment number 1, then the 7 values
                        of line segment number 2, and so on, and it finish
@@ -305,7 +341,7 @@ double * lsd_scale_region( int * n_out,
                        line segment number 'n+1' are obtained with
                        'out[7*n+0]' to 'out[7*n+6]'.
  */
-double * lsd_scale(int * n_out, double * img, int X, int Y, double scale);
+float * lsd_scale(int * n_out, unsigned char * img, int X, int Y, float scale);
 
 /*----------------------------------------------------------------------------*/
 /** LSD Simple Interface
@@ -314,14 +350,14 @@ double * lsd_scale(int * n_out, double * img, int X, int Y, double scale);
                        line segments detected.
 
     @param img         Pointer to input image data. It must be an array of
-                       doubles of size X x Y, and the pixel at coordinates
+                       floats of size X x Y, and the pixel at coordinates
                        (x,y) is obtained by img[x+y*X].
 
     @param X           X size of the image: the number of columns.
 
     @param Y           Y size of the image: the number of rows.
 
-    @return            A double array of size 7 x n_out, containing the list
+    @return            A float array of size 7 x n_out, containing the list
                        of line segments detected. The array contains first
                        7 values of line segment number 1, then the 7 values
                        of line segment number 2, and so on, and it finish
@@ -338,12 +374,12 @@ double * lsd_scale(int * n_out, double * img, int X, int Y, double scale);
  */
 
 struct lines_t{
-  lines_t(double(*v)[4], double(*h)[4], int lv, int lh)
+  lines_t(float(*v)[4], float(*h)[4], int lv, int lh)
         :lines_v(v), lines_h(h), len_v(lv), len_h(lh)
   {};
 
-  double(*lines_v)[4];
-  double(*lines_h)[4];
+  float(*lines_v)[4];
+  float(*lines_h)[4];
   int len_v;
   int len_h;
 };
@@ -352,8 +388,8 @@ struct lines_t{
 extern "C"{
 #endif
 
-double * lsd(int * n_out, double * img, int X, int Y);
-lines_t* lsd_with_line_merge(double * img, int X, int Y);
+float * lsd(int * n_out, unsigned char * img, int X, int Y);
+lines_t* lsd_with_line_merge(unsigned char * img, int X, int Y);
 void free_memory(void* ptr);
 
 #ifdef __cplusplus
@@ -363,34 +399,33 @@ void free_memory(void* ptr);
 
 
 
-int reduce_lines(double (*lines)[4], 
+int reduce_lines(float (*lines)[4], 
                   const int len, 
-                  double * dist, 
+                  float * dist, 
                   const int size,
-                  double (*lines_reduced)[4],
-                  double thresh);
+                  float (*lines_reduced)[4],
+                  float thresh);
 
 
-lines_t* reduce_graph(double (*lines)[4], int& size);
-void reduce_parallel(double (*lines)[4], int& size);
+lines_t* reduce_graph(float (*lines)[4], int& size);
+void reduce_parallel(float (*lines)[4], int& size);
 
-int argmin(const double* dist, const int row, const int size);
+int argmin(const float* dist, const int row, const int size);
 
 
-int argmax(const double* dist, const int row, const int size);
+int argmax(const float* dist, const int row, const int size);
 bool is_in(std::vector<int> & visited, const int val);
 
 int __next_node(const int cur_idx, 
-                double * dist, 
+                float * dist, 
                 const int size,
                 std::vector<int> & visited,
-                double thresh);
+                float thresh);
 
-void merge_lines_max_dist(const double (&l1)[4], const double (&l2)[4], double (&out)[4]);
-int* cluster_angles(double* angles, const int size);
-double *merge_lines_parallel(const double (*lines)[4], const int idx_a, const int idx_b);
+void merge_lines_max_dist(const float (&l1)[4], const float (&l2)[4], float (&out)[4]);
+float *merge_lines_parallel(const float (*lines)[4], const int idx_a, const int idx_b);
 
-double calculate_distance_thresh(const double* dist, const int size);
+float calculate_distance_thresh(const float* dist, const int size);
 
 #endif /* !LSD_HEADER */
 /*----------------------------------------------------------------------------*/

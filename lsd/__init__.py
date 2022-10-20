@@ -11,18 +11,18 @@ print("Loading {}".format(libpath))
 liblsd = CT.cdll.LoadLibrary(libpath)
 
 class lines_t(CT.Structure):
-    _fields_ = [("lines_v", CT.POINTER(CT.c_double)),
-                ("lines_h", CT.POINTER(CT.c_double)),
+    _fields_ = [("lines_v", CT.POINTER(CT.c_float)),
+                ("lines_h", CT.POINTER(CT.c_float)),
                 ("len_v", CT.c_int),
                 ("len_h", CT.c_int)]
 
 # Set the argument types
 liblsd.lsd.argtypes = [CT.POINTER(CT.c_int), 
-                       CT.POINTER(CT.c_double), 
+                       CT.POINTER(CT.c_uint8), 
                        CT.c_int, CT.c_int]
-liblsd.lsd.restype = CT.POINTER(CT.c_double)
+liblsd.lsd.restype = CT.POINTER(CT.c_float)
 
-liblsd.lsd_with_line_merge.argtypes = [CT.POINTER(CT.c_double), 
+liblsd.lsd_with_line_merge.argtypes = [CT.POINTER(CT.c_uint8), 
                                        CT.c_int, CT.c_int]
 liblsd.lsd_with_line_merge.restype = CT.POINTER(lines_t)
 
@@ -31,7 +31,7 @@ liblsd.free_memory.restype = None
 
 def lsd(img, x, y):
     n_out = CT.c_int() 
-    img_pix = (CT.c_double * len(img))(*img)
+    img_pix = (CT.c_uint8 * len(img))(*img)
     segs = liblsd.lsd(CT.byref(n_out), img_pix, x, y)
     ret = [(segs[7*i+0], 
                 segs[7*i+1], 
@@ -45,7 +45,7 @@ def lsd(img, x, y):
 
 
 def lsd_with_line_merge(img, x, y):
-    img_pix = (CT.c_double * len(img))(*img)
+    img_pix = (CT.c_uint8 * len(img))(*img)
     segs = liblsd.lsd_with_line_merge(img_pix,
                                      CT.c_int(x),
                                      CT.c_int(y))

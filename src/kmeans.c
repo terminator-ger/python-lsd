@@ -27,7 +27,7 @@ update_r(kmeans_config *config)
 
 	for (i = 0; i < config->num_objs; i++)
 	{
-		double distance, curr_distance;
+		float distance, curr_distance;
 		int cluster, curr_cluster;
 		Pointer obj;
 
@@ -313,10 +313,10 @@ kmeans(kmeans_config *config)
 
 
 
-static double d_distance(const Pointer a, const Pointer b)
+static float d_distance(const Pointer a, const Pointer b)
 {
-	double da = *((double*)a);
-	double db = *((double*)b);
+	float da = *((float*)a);
+	float db = *((float*)b);
 	return fabs(da - db);
 }
 
@@ -324,9 +324,9 @@ static void d_centroid(const Pointer * objs, const int * clusters, size_t num_ob
 {
   int i;
 	int num_cluster = 0;
-	double sum = 0;
-	double **doubles = (double**)objs;
-	double *dcentroid = (double*)centroid;
+	float sum = 0;
+	float **floats = (float**)objs;
+	float *dcentroid = (float*)centroid;
 
 	if (num_objs <= 0) return;
 
@@ -336,7 +336,7 @@ static void d_centroid(const Pointer * objs, const int * clusters, size_t num_ob
 		if (clusters[i] != cluster)
 			continue;
 
-		sum += *(doubles[i]);
+		sum += *(floats[i]);
 		num_cluster++;
 	}
 	if (num_cluster)
@@ -347,10 +347,10 @@ static void d_centroid(const Pointer * objs, const int * clusters, size_t num_ob
 	return;
 }
 
-int* cluster_angles( double* angles, const int size){
-	double c[2] = {0.0, M_PI/2};
+int* cluster_angles( float* angles, const int size){
+	float c[2] = {0.0, M_PI/2};
   	//int result[size] = {0};
-	int* result = calloc(size, sizeof(double));
+	int* result = calloc(size, sizeof(float));
 	kmeans_config config;
 	kmeans_result kmeans_result;
 	int i;
@@ -366,7 +366,7 @@ int* cluster_angles( double* angles, const int size){
 	config.clusters = (int*)calloc(config.num_objs, sizeof(int));
 
 	/* populate objs */
-    //memcpy(config.objs, angles, size*sizeof(double));
+    //memcpy(config.objs, angles, size*sizeof(float));
 
 	for (i = 0; i < config.num_objs - 1; i++){
 		config.objs[i] = &(angles[i]);

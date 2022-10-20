@@ -71,7 +71,7 @@ typedef enum {
 /*
 * Prototype for the distance calculating function
 */
-typedef double (*kmeans_distance_method) (const Pointer a, const Pointer b);
+typedef float (*kmeans_distance_method) (const Pointer a, const Pointer b);
 
 /*
 * Prototype for the centroid calculating function
@@ -127,7 +127,7 @@ typedef struct kmeans_config
 
 /* This is where the magic happens. */
 kmeans_result kmeans(kmeans_config *config);
-int* cluster_angles(double* angles, const int size);
+int* cluster_angles(float* angles, const int size);
 
 #ifdef __cplusplus
 }

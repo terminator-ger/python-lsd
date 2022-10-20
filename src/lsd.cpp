@@ -1,3 +1,334 @@
+/*
+ * This file is part of the OpenMV project.
+ *
+ * Copyright (c) 2013-2021 Ibrahim Abdelkader <iabdalkader@openmv.io>
+ * Copyright (c) 2013-2021 Kwabena W. Agyeman <kwagyeman@openmv.io>
+ *
+ * This work is licensed under the MIT license, see the file LICENSE for details.
+ *
+ * Line Segment Detector.
+ */
+#include <float.h>
+#include <limits.h>
+//#include "imlib.h"
+
+//#ifdef IMLIB_ENABLE_FIND_LINE_SEGMENTS
+//#pragma GCC diagnostic push
+//#pragma GCC diagnostic ignored "-Wunused-function"
+//#pragma GCC diagnostic ignored "-Wunused-variable"
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#define lsd_error(msg)  printf ("%s \n", msg);
+//#define free(ptr) ({ umm_free(ptr); })
+//#define malloc(size) ({ void *_r = umm_malloc(size); if(!_r) lsd_error(); _r; })
+//#define realloc(ptr, size) ({ void *_r = umm_realloc((ptr), (size)); if(!_r) lsd_error(); _r; })
+//#define calloc(num, item_size) ({ void *_r = umm_calloc((num), (item_size)); if(!_r) lsd_error(); _r; })
+//#define sqrt(x) fast_sqrtf(x)
+//#define floor(x) fast_floorf(x)
+//#define ceil(x) fast_ceilf(x)
+//#define round(x) fast_roundf(x)
+//#define atan(x) fast_atanf(x)
+//#define atan2(y, x) fast_atan2f((y), (x))
+//#define exp(x) fast_expf(x)
+//#define fabs(x) fast_fabsf(x)
+//#define log(x) fast_log(x)
+//#define log10(x) log10f(x)
+//#define cos(x) cosf(x)
+//#define sin(x) sinf(x)
+//#define pow(x,y) powf((x),(y))
+//#define sinh(x) sinhf(x)
+#define radToDeg(x) ((x) * (180.0f / M_PI))
+#define degToRad(x) ((x) * (M_PI / 180.0f))
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+//////// "lsd.h"
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/*----------------------------------------------------------------------------
+
+  LSD - Line Segment Detector on digital images
+
+  This code is part of the following publication and was subject
+  to peer review:
+
+    "LSD: a Line Segment Detector" by Rafael Grompone von Gioi,
+    Jeremie Jakubowicz, Jean-Michel Morel, and Gregory Randall,
+    Image Processing On Line, 2012. DOI:10.5201/ipol.2012.gjmr-lsd
+    http://dx.doi.org/10.5201/ipol.2012.gjmr-lsd
+
+  Copyright (c) 2007-2011 rafael grompone von gioi <grompone@gmail.com>
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as
+  published by the Free Software Foundation, either version 3 of the
+  License, or (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program. If not, see <http://www.gnu.org/licenses/>.
+
+  ----------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------*/
+/** @file lsd.h
+    LSD module header
+    @author rafael grompone von gioi <grompone@gmail.com>
+ */
+/*----------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------*/
+/** LSD Full Interface
+
+    @param n_out       Pointer to an int where LSD will store the number of
+                       line segments detected.
+
+    @param img         Pointer to input image data. It must be an array of
+                       unsigned chars of size X x Y, and the pixel at coordinates
+                       (x,y) is obtained by img[x+y*X].
+
+    @param X           X size of the image: the number of columns.
+
+    @param Y           Y size of the image: the number of rows.
+
+    @param scale       When different from 1.0, LSD will scale the input image
+                       by 'scale' factor by Gaussian filtering, before detecting
+                       line segments.
+                       Example: if scale=0.8, the input image will be subsampled
+                       to 80% of its size, before the line segment detector
+                       is applied.
+                       Suggested value: 0.8
+
+    @param sigma_scale When scale!=1.0, the sigma of the Gaussian filter is:
+                       sigma = sigma_scale / scale,   if scale <  1.0
+                       sigma = sigma_scale,           if scale >= 1.0
+                       Suggested value: 0.6
+
+    @param quant       Bound to the quantization error on the gradient norm.
+                       Example: if gray levels are quantized to integer steps,
+                       the gradient (computed by finite differences) error
+                       due to quantization will be bounded by 2.0, as the
+                       worst case is when the error are 1 and -1, that
+                       gives an error of 2.0.
+                       Suggested value: 2.0
+
+    @param ang_th      Gradient angle tolerance in the region growing
+                       algorithm, in degrees.
+                       Suggested value: 22.5
+
+    @param log_eps     Detection threshold, accept if -log10(NFA) > log_eps.
+                       The larger the value, the more strict the detector is,
+                       and will result in less detections.
+                       (Note that the 'minus sign' makes that this
+                       behavior is opposite to the one of NFA.)
+                       The value -log10(NFA) is equivalent but more
+                       intuitive than NFA:
+                       - -1.0 gives an average of 10 false detections on noise
+                       -  0.0 gives an average of 1 false detections on noise
+                       -  1.0 gives an average of 0.1 false detections on nose
+                       -  2.0 gives an average of 0.01 false detections on noise
+                       .
+                       Suggested value: 0.0
+
+    @param density_th  Minimal proportion of 'supporting' points in a rectangle.
+                       Suggested value: 0.7
+
+    @param n_bins      Number of bins used in the pseudo-ordering of gradient
+                       modulus.
+                       Suggested value: 1024
+
+    @param reg_img     Optional output: if desired, LSD will return an
+                       int image where each pixel indicates the line segment
+                       to which it belongs. Unused pixels have the value '0',
+                       while the used ones have the number of the line segment,
+                       numbered 1,2,3,..., in the same order as in the
+                       output list. If desired, a non NULL int** pointer must
+                       be assigned, and LSD will make that the pointer point
+                       to an int array of size reg_x x reg_y, where the pixel
+                       value at (x,y) is obtained with (*reg_img)[x+y*reg_x].
+                       Note that the resulting image has the size of the image
+                       used for the processing, that is, the size of the input
+                       image scaled by the given factor 'scale'. If scale!=1
+                       this size differs from XxY and that is the reason why
+                       its value is given by reg_x and reg_y.
+                       Suggested value: NULL
+
+    @param reg_x       Pointer to an int where LSD will put the X size
+                       'reg_img' image, when asked for.
+                       Suggested value: NULL
+
+    @param reg_y       Pointer to an int where LSD will put the Y size
+                       'reg_img' image, when asked for.
+                       Suggested value: NULL
+
+    @return            A float array of size 7 x n_out, containing the list
+                       of line segments detected. The array contains first
+                       7 values of line segment number 1, then the 7 values
+                       of line segment number 2, and so on, and it finish
+                       by the 7 values of line segment number n_out.
+                       The seven values are:
+                       - x1,y1,x2,y2,width,p,-log10(NFA)
+                       .
+                       for a line segment from coordinates (x1,y1) to (x2,y2),
+                       a width 'width', an angle precision of p in (0,1) given
+                       by angle_tolerance/180 degree, and NFA value 'NFA'.
+                       If 'out' is the returned pointer, the 7 values of
+                       line segment number 'n+1' are obtained with
+                       'out[7*n+0]' to 'out[7*n+6]'.
+ */
+float * LineSegmentDetection( int * n_out,
+                               unsigned char * img, int X, int Y,
+                               float scale, float sigma_scale, float quant,
+                               float ang_th, float log_eps, float density_th,
+                               int n_bins,
+                               int ** reg_img, int * reg_x, int * reg_y );
+
+/*----------------------------------------------------------------------------*/
+/** LSD Simple Interface with Scale and Region output.
+
+    @param n_out       Pointer to an int where LSD will store the number of
+                       line segments detected.
+
+    @param img         Pointer to input image data. It must be an array of
+                       unsigned chars of size X x Y, and the pixel at coordinates
+                       (x,y) is obtained by img[x+y*X].
+
+    @param X           X size of the image: the number of columns.
+
+    @param Y           Y size of the image: the number of rows.
+
+    @param scale       When different from 1.0, LSD will scale the input image
+                       by 'scale' factor by Gaussian filtering, before detecting
+                       line segments.
+                       Example: if scale=0.8, the input image will be subsampled
+                       to 80% of its size, before the line segment detector
+                       is applied.
+                       Suggested value: 0.8
+
+    @param reg_img     Optional output: if desired, LSD will return an
+                       int image where each pixel indicates the line segment
+                       to which it belongs. Unused pixels have the value '0',
+                       while the used ones have the number of the line segment,
+                       numbered 1,2,3,..., in the same order as in the
+                       output list. If desired, a non NULL int** pointer must
+                       be assigned, and LSD will make that the pointer point
+                       to an int array of size reg_x x reg_y, where the pixel
+                       value at (x,y) is obtained with (*reg_img)[x+y*reg_x].
+                       Note that the resulting image has the size of the image
+                       used for the processing, that is, the size of the input
+                       image scaled by the given factor 'scale'. If scale!=1
+                       this size differs from XxY and that is the reason why
+                       its value is given by reg_x and reg_y.
+                       Suggested value: NULL
+
+    @param reg_x       Pointer to an int where LSD will put the X size
+                       'reg_img' image, when asked for.
+                       Suggested value: NULL
+
+    @param reg_y       Pointer to an int where LSD will put the Y size
+                       'reg_img' image, when asked for.
+                       Suggested value: NULL
+
+    @return            A float array of size 7 x n_out, containing the list
+                       of line segments detected. The array contains first
+                       7 values of line segment number 1, then the 7 values
+                       of line segment number 2, and so on, and it finish
+                       by the 7 values of line segment number n_out.
+                       The seven values are:
+                       - x1,y1,x2,y2,width,p,-log10(NFA)
+                       .
+                       for a line segment from coordinates (x1,y1) to (x2,y2),
+                       a width 'width', an angle precision of p in (0,1) given
+                       by angle_tolerance/180 degree, and NFA value 'NFA'.
+                       If 'out' is the returned pointer, the 7 values of
+                       line segment number 'n+1' are obtained with
+                       'out[7*n+0]' to 'out[7*n+6]'.
+ */
+float * lsd_scale_region( int * n_out,
+                           unsigned char * img, int X, int Y, float scale,
+                           int ** reg_img, int * reg_x, int * reg_y );
+
+/*----------------------------------------------------------------------------*/
+/** LSD Simple Interface with Scale
+
+    @param n_out       Pointer to an int where LSD will store the number of
+                       line segments detected.
+
+    @param img         Pointer to input image data. It must be an array of
+                       unsigned chars of size X x Y, and the pixel at coordinates
+                       (x,y) is obtained by img[x+y*X].
+
+    @param X           X size of the image: the number of columns.
+
+    @param Y           Y size of the image: the number of rows.
+
+    @param scale       When different from 1.0, LSD will scale the input image
+                       by 'scale' factor by Gaussian filtering, before detecting
+                       line segments.
+                       Example: if scale=0.8, the input image will be subsampled
+                       to 80% of its size, before the line segment detector
+                       is applied.
+                       Suggested value: 0.8
+
+    @return            A float array of size 7 x n_out, containing the list
+                       of line segments detected. The array contains first
+                       7 values of line segment number 1, then the 7 values
+                       of line segment number 2, and so on, and it finish
+                       by the 7 values of line segment number n_out.
+                       The seven values are:
+                       - x1,y1,x2,y2,width,p,-log10(NFA)
+                       .
+                       for a line segment from coordinates (x1,y1) to (x2,y2),
+                       a width 'width', an angle precision of p in (0,1) given
+                       by angle_tolerance/180 degree, and NFA value 'NFA'.
+                       If 'out' is the returned pointer, the 7 values of
+                       line segment number 'n+1' are obtained with
+                       'out[7*n+0]' to 'out[7*n+6]'.
+ */
+float * lsd_scale(int * n_out, unsigned char * img, int X, int Y, float scale);
+
+/*----------------------------------------------------------------------------*/
+/** LSD Simple Interface
+
+    @param n_out       Pointer to an int where LSD will store the number of
+                       line segments detected.
+
+    @param img         Pointer to input image data. It must be an array of
+                       unsigned chars of size X x Y, and the pixel at coordinates
+                       (x,y) is obtained by img[x+y*X].
+
+    @param X           X size of the image: the number of columns.
+
+    @param Y           Y size of the image: the number of rows.
+
+    @return            A float array of size 7 x n_out, containing the list
+                       of line segments detected. The array contains first
+                       7 values of line segment number 1, then the 7 values
+                       of line segment number 2, and so on, and it finish
+                       by the 7 values of line segment number n_out.
+                       The seven values are:
+                       - x1,y1,x2,y2,width,p,-log10(NFA)
+                       .
+                       for a line segment from coordinates (x1,y1) to (x2,y2),
+                       a width 'width', an angle precision of p in (0,1) given
+                       by angle_tolerance/180 degree, and NFA value 'NFA'.
+                       If 'out' is the returned pointer, the 7 values of
+                       line segment number 'n+1' are obtained with
+                       'out[7*n+0]' to 'out[7*n+6]'.
+ */
+
+/*----------------------------------------------------------------------------*/
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+//////// "lsd.c"
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
 /*----------------------------------------------------------------------------
 
   LSD - Line Segment Detector on digital images
@@ -109,6 +440,7 @@
 #include "../include/knncpp.h"
 #include "../include/lsd.hpp"
 #include "../include/statistics.h"
+#include "../include/sincostab.h"
 
 #ifndef NDEBUG
   #include <opencv2/core.hpp>
@@ -117,38 +449,6 @@
   #include <opencv2/imgproc.hpp>
 #endif
 
-/** ln(10) */
-#ifndef M_LN10
-#define M_LN10 2.30258509299404568402
-#endif /* !M_LN10 */
-
-/** PI */
-#ifndef M_PI
-#define M_PI   3.14159265358979323846
-#endif /* !M_PI */
-
-#ifndef FALSE
-#define FALSE 0
-#endif /* !FALSE */
-
-#ifndef TRUE
-#define TRUE 1
-#endif /* !TRUE */
-
-/** Label for pixels with undefined gradient. */
-#define NOTDEF -1024.0
-
-/** 3/2 pi */
-#define M_3_2_PI 4.71238898038
-
-/** 2 pi */
-#define M_2__PI  6.28318530718
-
-/** Label for pixels not used in yet. */
-#define NOTUSED 0
-
-/** Label for pixels already used in detection. */
-#define USED    1
 
 #ifndef NDEBUG
 static LineDrawer LD;
@@ -159,14 +459,14 @@ static LineDrawer LD;
  */
 struct coorlist
 {
-  int x,y;
+  int16_t x,y;
   struct coorlist * next;
 };
 
 /*----------------------------------------------------------------------------*/
 /** A point (or pixel).
  */
-struct point {int x,y;};
+struct lsd_point {int16_t x,y;};
 
 
 /*----------------------------------------------------------------------------*/
@@ -176,16 +476,16 @@ struct point {int x,y;};
 /*----------------------------------------------------------------------------*/
 /** Fatal error, print a message to standard-error output and exit.
  */
-static void error(char * msg)
-{
-  fprintf(stderr,"LSD Error: %s\n",msg);
-  exit(EXIT_FAILURE);
-}
+//static void lsd_error(char * msg)
+//{
+//  fprintf(stderr,"LSD Error: %s\n",msg);
+//  exit(EXIT_FAILURE);
+//}
 
 /*----------------------------------------------------------------------------*/
 /** Doubles relative error factor
  */
-#define RELATIVE_ERROR_FACTOR 100.0
+#define RELATIVE_ERROR_FACTOR 100.0f
 
 /*----------------------------------------------------------------------------*/
 /** Compare doubles by relative error.
@@ -198,33 +498,36 @@ static void error(char * msg)
     should be related to the cumulated rounding error in the chain of
     computation. Here, as a simplification, a fixed factor is used.
  */
-static int double_equal(double a, double b)
+static int double_equal(float a, float b)
 {
-  double abs_diff,aa,bb,abs_max;
+  float abs_diff,aa,bb,abs_max;
 
   /* trivial case */
   if( a == b ) return TRUE;
 
   abs_diff = fabs(a-b);
+  // For the numbers we work with, this is valid test that avoids some calculations.
+  // The error threshold tested below is 1/1000 of the diff/max_val
+  if (abs_diff > 0.1f) return FALSE;
   aa = fabs(a);
   bb = fabs(b);
   abs_max = aa > bb ? aa : bb;
 
-  /* DBL_MIN is the smallest normalized number, thus, the smallest
-     number whose relative error is bounded by DBL_EPSILON. For
-     smaller numbers, the same quantization steps as for DBL_MIN
+  /* FLT_MIN is the smallest normalized number, thus, the smallest
+     number whose relative error is bounded by FLT_EPSILON. For
+     smaller numbers, the same quantization steps as for FLT_MIN
      are used. Then, for smaller numbers, a meaningful "relative"
-     error should be computed by dividing the difference by DBL_MIN. */
-  if( abs_max < DBL_MIN ) abs_max = DBL_MIN;
+     error should be computed by dividing the difference by FLT_MIN. */
+  if( abs_max < FLT_MIN ) abs_max = FLT_MIN;
 
   /* equal if relative error <= factor x eps */
-  return (abs_diff / abs_max) <= (RELATIVE_ERROR_FACTOR * DBL_EPSILON);
+  return (abs_diff / abs_max) <= (RELATIVE_ERROR_FACTOR * FLT_EPSILON);
 }
 
 /*----------------------------------------------------------------------------*/
 /** Computes Euclidean distance between point (x1,y1) and point (x2,y2).
  */
-static double dist(double x1, double y1, double x2, double y2)
+static float dist(float x1, float y1, float x2, float y2)
 {
   return sqrt( (x2-x1)*(x2-x1) + (y2-y1)*(y2-y1) );
 }
@@ -260,7 +563,7 @@ typedef struct ntuple_list_s
   unsigned int size;
   unsigned int max_size;
   unsigned int dim;
-  double * values;
+  float * values;
 } * ntuple_list;
 
 /*----------------------------------------------------------------------------*/
@@ -269,7 +572,7 @@ typedef struct ntuple_list_s
 static void free_ntuple_list(ntuple_list in)
 {
   if( in == NULL || in->values == NULL )
-    error("free_ntuple_list: invalid n-tuple input.");
+    lsd_error("free_ntuple_list: invalid n-tuple input.");
   free( (void *) in->values );
   free( (void *) in );
 }
@@ -283,11 +586,11 @@ static ntuple_list new_ntuple_list(unsigned int dim)
   ntuple_list n_tuple;
 
   /* check parameters */
-  if( dim == 0 ) error("new_ntuple_list: 'dim' must be positive.");
+  if( dim == 0 ) lsd_error("new_ntuple_list: 'dim' must be positive.");
 
   /* get memory for list structure */
   n_tuple = (ntuple_list) malloc( sizeof(struct ntuple_list_s) );
-  if( n_tuple == NULL ) error("not enough memory.");
+  if( n_tuple == NULL ) lsd_error("not enough memory.");
 
   /* initialize list */
   n_tuple->size = 0;
@@ -295,8 +598,8 @@ static ntuple_list new_ntuple_list(unsigned int dim)
   n_tuple->dim = dim;
 
   /* get memory for tuples */
-  n_tuple->values = (double *) malloc( dim*n_tuple->max_size * sizeof(double) );
-  if( n_tuple->values == NULL ) error("not enough memory.");
+  n_tuple->values = (float *) malloc( dim*n_tuple->max_size * sizeof(float) );
+  if( n_tuple->values == NULL ) lsd_error("not enough memory.");
 
   return n_tuple;
 }
@@ -308,30 +611,30 @@ static void enlarge_ntuple_list(ntuple_list n_tuple)
 {
   /* check parameters */
   if( n_tuple == NULL || n_tuple->values == NULL || n_tuple->max_size == 0 )
-    error("enlarge_ntuple_list: invalid n-tuple.");
+    lsd_error("enlarge_ntuple_list: invalid n-tuple.");
 
   /* duplicate number of tuples */
   n_tuple->max_size *= 2;
 
   /* realloc memory */
-  n_tuple->values = (double *) realloc( (void *) n_tuple->values,
-                      n_tuple->dim * n_tuple->max_size * sizeof(double) );
-  if( n_tuple->values == NULL ) error("not enough memory.");
+  n_tuple->values = (float *) realloc( (void *) n_tuple->values,
+                      n_tuple->dim * n_tuple->max_size * sizeof(float) );
+  if( n_tuple->values == NULL ) lsd_error("not enough memory.");
 }
 
 /*----------------------------------------------------------------------------*/
 /** Add a 7-tuple to an n-tuple list.
  */
-static void add_7tuple( ntuple_list out, double v1, double v2, double v3,
-                        double v4, double v5, double v6, double v7 )
+static void add_7tuple( ntuple_list out, float v1, float v2, float v3,
+                        float v4, float v5, float v6, float v7 )
 {
   /* check parameters */
-  if( out == NULL ) error("add_7tuple: invalid n-tuple input.");
-  if( out->dim != 7 ) error("add_7tuple: the n-tuple must be a 7-tuple.");
+  if( out == NULL ) lsd_error("add_7tuple: invalid n-tuple input.");
+  if( out->dim != 7 ) lsd_error("add_7tuple: the n-tuple must be a 7-tuple.");
 
   /* if needed, alloc more tuples to 'out' */
   if( out->size == out->max_size ) enlarge_ntuple_list(out);
-  if( out->values == NULL ) error("add_7tuple: invalid n-tuple input.");
+  if( out->values == NULL ) lsd_error("add_7tuple: invalid n-tuple input.");
 
   /* add new 7-tuple */
   out->values[ out->size * out->dim + 0 ] = v1;
@@ -372,7 +675,7 @@ typedef struct image_char_s
 static void free_image_char(image_char i)
 {
   if( i == NULL || i->data == NULL )
-    error("free_image_char: invalid input image.");
+    lsd_error("free_image_char: invalid input image.");
   free( (void *) i->data );
   free( (void *) i );
 }
@@ -385,18 +688,44 @@ static image_char new_image_char(unsigned int xsize, unsigned int ysize)
   image_char image;
 
   /* check parameters */
-  if( xsize == 0 || ysize == 0 ) error("new_image_char: invalid image size.");
+  if( xsize == 0 || ysize == 0 ) lsd_error("new_image_char: invalid image size.");
 
   /* get memory */
   image = (image_char) malloc( sizeof(struct image_char_s) );
-  if( image == NULL ) error("not enough memory.");
+  if( image == NULL ) lsd_error("not enough memory.");
   image->data = (unsigned char *) calloc( (size_t) (xsize*ysize),
                                           sizeof(unsigned char) );
-  if( image->data == NULL ) error("not enough memory.");
+  if( image->data == NULL ) lsd_error("not enough memory.");
 
   /* set image size */
   image->xsize = xsize;
   image->ysize = ysize;
+
+  return image;
+}
+
+/*----------------------------------------------------------------------------*/
+/** Create a new image_double of size 'xsize' times 'ysize'
+    with the data pointed by 'data'.
+ */
+static image_char new_image_char_ptr( unsigned int xsize,
+                                      unsigned int ysize, unsigned char * data )
+{
+  image_char image;
+
+  /* check parameters */
+  if( xsize == 0 || ysize == 0 )
+    lsd_error("new_image_char_ptr: invalid image size.");
+  if( data == NULL ) lsd_error("new_image_char_ptr: NULL data pointer.");
+
+  /* get memory */
+  image = (image_char) malloc( sizeof(struct image_char_s) );
+  if( image == NULL ) lsd_error("not enough memory.");
+
+  /* set image */
+  image->xsize = xsize;
+  image->ysize = ysize;
+  image->data = data;
 
   return image;
 }
@@ -414,7 +743,7 @@ static image_char new_image_char_ini( unsigned int xsize, unsigned int ysize,
 
   /* check parameters */
   if( image == NULL || image->data == NULL )
-    error("new_image_char_ini: invalid image.");
+    lsd_error("new_image_char_ini: invalid image.");
 
   /* initialize */
   for(i=0; i<N; i++) image->data[i] = fill_value;
@@ -433,9 +762,20 @@ static image_char new_image_char_ini( unsigned int xsize, unsigned int ysize,
  */
 typedef struct image_int_s
 {
-  int * data;
+  int16_t * data;
   unsigned int xsize,ysize;
 } * image_int;
+
+/*----------------------------------------------------------------------------*/
+/** Free memory used in image_int 'i'.
+ */
+static void free_image_int(image_int i)
+{
+  if( i == NULL || i->data == NULL )
+    lsd_error("free_image_int: invalid input image.");
+  free( (void *) i->data );
+  free( (void *) i );
+}
 
 /*----------------------------------------------------------------------------*/
 /** Create a new image_int of size 'xsize' times 'ysize'.
@@ -445,13 +785,13 @@ static image_int new_image_int(unsigned int xsize, unsigned int ysize)
   image_int image;
 
   /* check parameters */
-  if( xsize == 0 || ysize == 0 ) error("new_image_int: invalid image size.");
+  if( xsize == 0 || ysize == 0 ) lsd_error("new_image_int: invalid image size.");
 
   /* get memory */
   image = (image_int) malloc( sizeof(struct image_int_s) );
-  if( image == NULL ) error("not enough memory.");
-  image->data = (int *) calloc( (size_t) (xsize*ysize), sizeof(int) );
-  if( image->data == NULL ) error("not enough memory.");
+  if( image == NULL ) lsd_error("not enough memory.");
+  image->data = (int16_t *) calloc( (size_t) (xsize*ysize), sizeof(int16_t) );
+  if( image->data == NULL ) lsd_error("not enough memory.");
 
   /* set image size */
   image->xsize = xsize;
@@ -478,7 +818,7 @@ static image_int new_image_int_ini( unsigned int xsize, unsigned int ysize,
 }
 
 /*----------------------------------------------------------------------------*/
-/** double image data type
+/** float image data type
 
     The pixel value at (x,y) is accessed by:
 
@@ -486,24 +826,37 @@ static image_int new_image_int_ini( unsigned int xsize, unsigned int ysize,
 
     with x and y integer.
  */
+typedef struct image_float_s
+{
+  float * data;
+  unsigned int xsize,ysize;
+} * image_float;
+
 typedef struct image_double_s
 {
   double * data;
-  unsigned int xsize, ysize;
+  unsigned int xsize,ysize;
 } * image_double;
-
-
 /*----------------------------------------------------------------------------*/
 /** Free memory used in image_double 'i'.
  */
 static void free_image_double(image_double i)
 {
   if( i == NULL || i->data == NULL )
-    error("free_image_double: invalid input image.");
+    lsd_error("free_image_double: invalid input image.");
   free( (void *) i->data );
   free( (void *) i );
 }
-
+/*----------------------------------------------------------------------------*/
+/** Free memory used in image_double 'i'.
+ */
+static void free_image_float(image_float i)
+{
+  if( i == NULL || i->data == NULL )
+    lsd_error("free_image_double: invalid input image.");
+  free( (void *) i->data );
+  free( (void *) i );
+}
 /*----------------------------------------------------------------------------*/
 /** Create a new image_double of size 'xsize' times 'ysize'.
  */
@@ -512,14 +865,37 @@ static image_double new_image_double(unsigned int xsize, unsigned int ysize)
   image_double image;
 
   /* check parameters */
-  std::string err_msg = std::string("new_image_double: invalid image size." + std::to_string(xsize) + " " + std::to_string(ysize));
-  if( xsize == 0 || ysize == 0 ) error((char *)err_msg.c_str());
+  if( xsize == 0 || ysize == 0 ) lsd_error("new_image_double: invalid image size.");
 
   /* get memory */
   image = (image_double) malloc( sizeof(struct image_double_s) );
-  if( image == NULL ) error("not enough memory.");
+  if( image == NULL ) lsd_error("not enough memory.");
   image->data = (double *) calloc( (size_t) (xsize*ysize), sizeof(double) );
-  if( image->data == NULL ) error("not enough memory.");
+  if( image->data == NULL ) lsd_error("not enough memory.");
+
+  /* set image size */
+  image->xsize = xsize;
+  image->ysize = ysize;
+
+  return image;
+}
+
+
+/*----------------------------------------------------------------------------*/
+/** Create a new image_double of size 'xsize' times 'ysize'.
+ */
+static image_float new_image_float(unsigned int xsize, unsigned int ysize)
+{
+  image_float image;
+
+  /* check parameters */
+  if( xsize == 0 || ysize == 0 ) lsd_error("new_image_double: invalid image size.");
+
+  /* get memory */
+  image = (image_float) malloc( sizeof(struct image_float_s) );
+  if( image == NULL ) lsd_error("not enough memory.");
+  image->data = (float *) calloc( (size_t) (xsize*ysize), sizeof(float) );
+  if( image->data == NULL ) lsd_error("not enough memory.");
 
   /* set image size */
   image->xsize = xsize;
@@ -532,19 +908,19 @@ static image_double new_image_double(unsigned int xsize, unsigned int ysize)
 /** Create a new image_double of size 'xsize' times 'ysize'
     with the data pointed by 'data'.
  */
-static image_double new_image_double_ptr( unsigned int xsize,
-                                          unsigned int ysize, double * data )
+static image_float new_image_float_ptr( unsigned int xsize,
+                                          unsigned int ysize, float * data )
 {
-  image_double image;
+  image_float image;
 
   /* check parameters */
   if( xsize == 0 || ysize == 0 )
-    error("new_image_double_ptr: invalid image size.");
-  if( data == NULL ) error("new_image_double_ptr: NULL data pointer.");
+    lsd_error("new_image_double_ptr: invalid image size.");
+  if( data == NULL ) lsd_error("new_image_double_ptr: NULL data pointer.");
 
   /* get memory */
-  image = (image_double) malloc( sizeof(struct image_double_s) );
-  if( image == NULL ) error("not enough memory.");
+  image = (image_float) malloc( sizeof(struct image_float_s) );
+  if( image == NULL ) lsd_error("not enough memory.");
 
   /* set image */
   image->xsize = xsize;
@@ -567,29 +943,29 @@ static image_double new_image_double_ptr( unsigned int xsize,
     in the middle point between values 'kernel->values[0]'
     and 'kernel->values[1]'.
  */
-static void gaussian_kernel(ntuple_list kernel, double sigma, double mean)
+static void gaussian_kernel(ntuple_list kernel, float sigma, float mean)
 {
-  double sum = 0.0;
-  double val;
+  float sum = 0.0;
+  float val;
   unsigned int i;
 
   /* check parameters */
   if( kernel == NULL || kernel->values == NULL )
-    error("gaussian_kernel: invalid n-tuple 'kernel'.");
-  if( sigma <= 0.0 ) error("gaussian_kernel: 'sigma' must be positive.");
+    lsd_error("gaussian_kernel: invalid n-tuple 'kernel'.");
+  if( sigma <= 0.0 ) lsd_error("gaussian_kernel: 'sigma' must be positive.");
 
   /* compute Gaussian kernel */
   if( kernel->max_size < 1 ) enlarge_ntuple_list(kernel);
   kernel->size = 1;
   for(i=0;i<kernel->dim;i++)
     {
-      val = ( (double) i - mean ) / sigma;
+      val = ( (float) i - mean ) / sigma;
       kernel->values[i] = exp( -0.5 * val * val );
       sum += kernel->values[i];
     }
 
   /* normalization */
-  if( sum >= 0.0 ) for(i=0;i<kernel->dim;i++) kernel->values[i] /= sum;
+  if( sum >= 0.0f ) for(i=0;i<kernel->dim;i++) kernel->values[i] /= sum;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -630,26 +1006,26 @@ static void gaussian_kernel(ntuple_list kernel, double sigma, double mean)
     in the x axis, and then the combined Gaussian kernel and sampling
     in the y axis.
  */
-static image_double gaussian_sampler( image_double in, double scale,
-                                      double sigma_scale )
+static image_double gaussian_sampler( image_double in, float scale,
+                                      float sigma_scale )
 {
   image_double aux,out;
   ntuple_list kernel;
   unsigned int N,M,h,n,x,y,i;
   int xc,yc,j,double_x_size,double_y_size;
-  double sigma,xx,yy,sum,prec;
+  float sigma,xx,yy,sum,prec;
 
   /* check parameters */
   if( in == NULL || in->data == NULL || in->xsize == 0 || in->ysize == 0 )
-    error("gaussian_sampler: invalid image.");
-  if( scale <= 0.0 ) error("gaussian_sampler: 'scale' must be positive.");
+    lsd_error("gaussian_sampler: invalid image.");
+  if( scale <= 0.0 ) lsd_error("gaussian_sampler: 'scale' must be positive.");
   if( sigma_scale <= 0.0 )
-    error("gaussian_sampler: 'sigma_scale' must be positive.");
+    lsd_error("gaussian_sampler: 'sigma_scale' must be positive.");
 
   /* compute new image size and get memory for images */
-  if( in->xsize * scale > (double) UINT_MAX ||
-      in->ysize * scale > (double) UINT_MAX )
-    error("gaussian_sampler: the output image size exceeds the handled size.");
+  if( in->xsize * scale > (float) UINT_MAX ||
+      in->ysize * scale > (float) UINT_MAX )
+    lsd_error("gaussian_sampler: the output image size exceeds the handled size.");
   N = (unsigned int) ceil( in->xsize * scale );
   M = (unsigned int) ceil( in->ysize * scale );
   aux = new_image_double(N,in->ysize);
@@ -670,7 +1046,7 @@ static image_double gaussian_sampler( image_double in, double scale,
   n = 1+2*h; /* kernel size */
   kernel = new_ntuple_list(n);
 
-  /* auxiliary double image size variables */
+  /* auxiliary float image size variables */
   double_x_size = (int) (2 * in->xsize);
   double_y_size = (int) (2 * in->ysize);
 
@@ -682,11 +1058,11 @@ static image_double gaussian_sampler( image_double in, double scale,
          xx  is the corresponding x-value in the original size image.
          xc  is the integer value, the pixel coordinate of xx.
        */
-      xx = (double) x / scale;
+      xx = (float) x / scale;
       /* coordinate (0.0,0.0) is in the center of pixel (0,0),
          so the pixel with xc=0 get the values of xx from -0.5 to 0.5 */
       xc = (int) floor( xx + 0.5 );
-      gaussian_kernel( kernel, sigma, (double) h + xx - (double) xc );
+      gaussian_kernel( kernel, sigma, (float) h + xx - (float) xc );
       /* the kernel must be computed for each x because the fine
          offset xx-xc is different in each case */
 
@@ -716,11 +1092,11 @@ static image_double gaussian_sampler( image_double in, double scale,
          yy  is the corresponding x-value in the original size image.
          yc  is the integer value, the pixel coordinate of xx.
        */
-      yy = (double) y / scale;
+      yy = (float) y / scale;
       /* coordinate (0.0,0.0) is in the center of pixel (0,0),
          so the pixel with yc=0 get the values of yy from -0.5 to 0.5 */
       yc = (int) floor( yy + 0.5 );
-      gaussian_kernel( kernel, sigma, (double) h + yy - (double) yc );
+      gaussian_kernel( kernel, sigma, (float) h + yy - (float) yc );
       /* the kernel must be computed for each y because the fine
          offset yy-yc is different in each case */
 
@@ -758,8 +1134,8 @@ static image_double gaussian_sampler( image_double in, double scale,
 /** Computes the direction of the level line of 'in' at each point.
 
     The result is:
-    - an image_double with the angle at each pixel, or NOTDEF if not defined.
-    - the image_double 'modgrad' (a pointer is passed as argument)
+    - an image_int with the angle at each pixel, or NOTDEF if not defined.
+    - the image_int 'modgrad' (a pointer is passed as argument)
       with the gradient magnitude at each point.
     - a list of pixels 'list_p' roughly ordered by decreasing
       gradient magnitude. (The order is made by classifying points
@@ -771,13 +1147,13 @@ static image_double gaussian_sampler( image_double in, double scale,
     - a pointer 'mem_p' to the memory used by 'list_p' to be able to
       free the memory when it is not used anymore.
  */
-static image_double ll_angle( image_double in, double threshold,
-                              struct coorlist ** list_p, void ** mem_p,
-                              image_double * modgrad, unsigned int n_bins )
+static image_int ll_angle( image_char in, float threshold,
+                           struct coorlist ** list_p, void ** mem_p,
+                           image_int * modgrad, unsigned int n_bins )
 {
-  image_double g;
+  image_int g;
   unsigned int n,p,x,y,adr,i;
-  double com1,com2,gx,gy,norm,norm2;
+  float com1,com2,gx,gy,norm,norm2;
   /* the rest of the variables are used for pseudo-ordering
      the gradient magnitude values */
   int list_count = 0;
@@ -786,26 +1162,26 @@ static image_double ll_angle( image_double in, double threshold,
   struct coorlist ** range_l_e; /* array of pointers to end of bin list */
   struct coorlist * start;
   struct coorlist * end;
-  double max_grad = 0.0;
+  float max_grad = 0.0;
 
   /* check parameters */
   if( in == NULL || in->data == NULL || in->xsize == 0 || in->ysize == 0 )
-    error("ll_angle: invalid image.");
-  if( threshold < 0.0 ) error("ll_angle: 'threshold' must be positive.");
-  if( list_p == NULL ) error("ll_angle: NULL pointer 'list_p'.");
-  if( mem_p == NULL ) error("ll_angle: NULL pointer 'mem_p'.");
-  if( modgrad == NULL ) error("ll_angle: NULL pointer 'modgrad'.");
-  if( n_bins == 0 ) error("ll_angle: 'n_bins' must be positive.");
+    lsd_error("ll_angle: invalid image.");
+  if( threshold < 0.0 ) lsd_error("ll_angle: 'threshold' must be positive.");
+  if( list_p == NULL ) lsd_error("ll_angle: NULL pointer 'list_p'.");
+  if( mem_p == NULL ) lsd_error("ll_angle: NULL pointer 'mem_p'.");
+  if( modgrad == NULL ) lsd_error("ll_angle: NULL pointer 'modgrad'.");
+  if( n_bins == 0 ) lsd_error("ll_angle: 'n_bins' must be positive.");
 
   /* image size shortcuts */
   n = in->ysize;
   p = in->xsize;
 
   /* allocate output image */
-  g = new_image_double(in->xsize,in->ysize);
+  g = new_image_int(in->xsize,in->ysize);
 
   /* get memory for the image of gradient modulus */
-  *modgrad = new_image_double(in->xsize,in->ysize);
+  *modgrad = new_image_int(in->xsize,in->ysize);
 
   /* get memory for "ordered" list of pixels */
   list = (struct coorlist *) calloc( (size_t) (n*p), sizeof(struct coorlist) );
@@ -815,7 +1191,7 @@ static image_double ll_angle( image_double in, double threshold,
   range_l_e = (struct coorlist **) calloc( (size_t) n_bins,
                                            sizeof(struct coorlist *) );
   if( list == NULL || range_l_s == NULL || range_l_e == NULL )
-    error("not enough memory.");
+    lsd_error("not enough memory.");
   for(i=0;i<n_bins;i++) range_l_s[i] = range_l_e[i] = NULL;
 
   /* 'undefined' on the down and right boundaries */
@@ -850,11 +1226,11 @@ static image_double ll_angle( image_double in, double threshold,
         (*modgrad)->data[adr] = norm; /* store gradient norm */
 
         if( norm <= threshold ) /* norm too small, gradient no defined */
-          g->data[adr] = NOTDEF; /* gradient angle not defined */
+          g->data[adr] = NOTDEF_INT; //radToDeg(NOTDEF); /* gradient angle not defined */
         else
           {
             /* gradient angle computation */
-            g->data[adr] = atan2(gx,-gy);
+            g->data[adr] = radToDeg(atan2(gx,-gy));
 
             /* look for the maximum of the gradient */
             if( norm > max_grad ) max_grad = norm;
@@ -868,7 +1244,7 @@ static image_double ll_angle( image_double in, double threshold,
         norm = (*modgrad)->data[y*p+x];
 
         /* store the point in the right bin according to its norm */
-        i = (unsigned int) (norm * (double) n_bins / max_grad);
+        i = (unsigned int) (norm * (float) n_bins / max_grad);
         if( i >= n_bins ) i = n_bins-1;
         if( range_l_e[i] == NULL )
           range_l_s[i] = range_l_e[i] = list+list_count++;
@@ -912,20 +1288,20 @@ static image_double ll_angle( image_double in, double threshold,
 /*----------------------------------------------------------------------------*/
 /** Is point (x,y) aligned to angle theta, up to precision 'prec'?
  */
-static int isaligned( int x, int y, image_double angles, double theta,
-                      double prec )
+static int isaligned( int x, int y, image_int angles, float theta,
+                      float prec )
 {
-  double a;
+  float a;
 
   /* check parameters */
   if( angles == NULL || angles->data == NULL )
-    error("isaligned: invalid image 'angles'.");
+    lsd_error("isaligned: invalid image 'angles'.");
   if( x < 0 || y < 0 || x >= (int) angles->xsize || y >= (int) angles->ysize )
-    error("isaligned: (x,y) out of the image.");
-  if( prec < 0.0 ) error("isaligned: 'prec' must be positive.");
+    lsd_error("isaligned: (x,y) out of the image.");
+  if( prec < 0.0 ) lsd_error("isaligned: 'prec' must be positive.");
 
   /* angle at pixel (x,y) */
-  a = angles->data[ x + y * angles->xsize ];
+  a = degToRad(angles->data[ x + y * angles->xsize ]);
 
   /* pixels whose level-line angle is not defined
      are considered as NON-aligned */
@@ -947,10 +1323,40 @@ static int isaligned( int x, int y, image_double angles, double theta,
   return theta <= prec;
 }
 
+static int isaligned_fast(int angle, float theta,
+                      float prec )
+{
+  float a;
+
+  if (angle == NOTDEF_INT) return FALSE; // faster to test the integer value
+
+  /* angle at pixel (x,y) */
+  a = degToRad(angle);
+
+  /* pixels whose level-line angle is not defined
+     are considered as NON-aligned */
+  if( a == NOTDEF ) return FALSE;  /* there is no need to call the function
+                                      'double_equal' here because there is
+                                      no risk of problems related to the
+                                      comparison doubles, we are only
+                                      interested in the exact NOTDEF value */
+
+  /* it is assumed that 'theta' and 'a' are in the range [-pi,pi] */
+  theta -= a;
+  if( theta < 0.0 ) theta = -theta;
+  if( theta > M_3_2_PI )
+    {
+      theta -= M_2__PI;
+      if( theta < 0.0 ) theta = -theta;
+    }
+
+  return theta <= prec;
+} /* isaligned_fast() */
+
 /*----------------------------------------------------------------------------*/
 /** Absolute value angle difference.
  */
-static double angle_diff(double a, double b)
+static float angle_diff(float a, float b)
 {
   a -= b;
   while( a <= -M_PI ) a += M_2__PI;
@@ -962,7 +1368,7 @@ static double angle_diff(double a, double b)
 /*----------------------------------------------------------------------------*/
 /** Signed angle difference.
  */
-static double angle_diff_signed(double a, double b)
+static float angle_diff_signed(float a, float b)
 {
   a -= b;
   while( a <= -M_PI ) a += M_2__PI;
@@ -999,19 +1405,19 @@ static double angle_diff_signed(double a, double b)
       q5 = 83.8676043424,
       q6 = 2.50662827511.
  */
-static double log_gamma_lanczos(double x)
+static float log_gamma_lanczos(float x)
 {
-  static double q[7] = { 75122.6331530, 80916.6278952, 36308.2951477,
+  static float q[7] = { 75122.6331530, 80916.6278952, 36308.2951477,
                          8687.24529705, 1168.92649479, 83.8676043424,
                          2.50662827511 };
-  double a = (x+0.5) * log(x+5.5) - (x+5.5);
-  double b = 0.0;
+  float a = (x+0.5) * log(x+5.5) - (x+5.5);
+  float b = 0.0;
   int n;
 
   for(n=0;n<7;n++)
     {
-      a -= log( x + (double) n );
-      b += q[n] * pow( x, (double) n );
+      a -= log( x + (float) n );
+      b += q[n] * pow( x, (float) n );
     }
   return a + log(b);
 }
@@ -1033,7 +1439,7 @@ static double log_gamma_lanczos(double x)
     @f]
     This formula is a good approximation when x > 15.
  */
-static double log_gamma_windschitl(double x)
+static float log_gamma_windschitl(float x)
 {
   return 0.918938533204673 + (x-0.5)*log(x) - x
          + 0.5*x*log( x*sinh(1/x) + 1/(810.0*pow(x,6.0)) );
@@ -1046,10 +1452,10 @@ static double log_gamma_windschitl(double x)
  */
 #define log_gamma(x) ((x)>15.0?log_gamma_windschitl(x):log_gamma_lanczos(x))
 
-/*----------------------------------------------------------------------------*/
-/** Size of the table to store already computed inverse values.
- */
-#define TABSIZE 100000
+///*----------------------------------------------------------------------------*/
+///** Size of the table to store already computed inverse values.
+// */
+//#define TABSIZE 100000
 
 /*----------------------------------------------------------------------------*/
 /** Computes -log10(NFA).
@@ -1093,20 +1499,20 @@ static double log_gamma_windschitl(double x)
     of the terms are neglected based on a bound to the error obtained
     (an error of 10% in the result is accepted).
  */
-static double nfa(int n, int k, double p, double logNT)
+static float nfa(int n, int k, float p, float logNT)
 {
-  static double inv[TABSIZE];   /* table to keep computed inverse values */
-  double tolerance = 0.1;       /* an error of 10% in the result is accepted */
-  double log1term,term,bin_term,mult_term,bin_tail,err,p_term;
+//  static float inv[TABSIZE];   /* table to keep computed inverse values */
+  float tolerance = 0.1;       /* an error of 10% in the result is accepted */
+  float log1term,term,bin_term,mult_term,bin_tail,err,p_term;
   int i;
 
   /* check parameters */
   if( n<0 || k<0 || k>n || p<=0.0 || p>=1.0 )
-    error("nfa: wrong n, k or p values.");
+    lsd_error("nfa: wrong n, k or p values.");
 
   /* trivial cases */
   if( n==0 || k==0 ) return -logNT;
-  if( n==k ) return -logNT - (double) n * log10(p);
+  if( n==k ) return -logNT - (float) n * log10(p);
 
   /* probability term */
   p_term = p / (1.0-p);
@@ -1119,15 +1525,15 @@ static double nfa(int n, int k, double p, double logNT)
        bincoef(n,k) = gamma(n+1) / ( gamma(k+1) * gamma(n-k+1) ).
      We use this to compute the first term. Actually the log of it.
    */
-  log1term = log_gamma( (double) n + 1.0 ) - log_gamma( (double) k + 1.0 )
-           - log_gamma( (double) (n-k) + 1.0 )
-           + (double) k * log(p) + (double) (n-k) * log(1.0-p);
+  log1term = log_gamma( (float) n + 1.0 ) - log_gamma( (float) k + 1.0 )
+           - log_gamma( (float) (n-k) + 1.0 )
+           + (float) k * log(p) + (float) (n-k) * log(1.0-p);
   term = exp(log1term);
 
   /* in some cases no more computations are needed */
   if( double_equal(term,0.0) )              /* the first term is almost zero */
     {
-      if( (double) k > (double) n * p )     /* at begin or end of the tail?  */
+      if( (float) k > (float) n * p )     /* at begin or end of the tail?  */
         return -log1term / M_LN10 - logNT;  /* end: use just the first term  */
       else
         return -logNT;                      /* begin: the tail is roughly 1  */
@@ -1150,9 +1556,10 @@ static double nfa(int n, int k, double p, double logNT)
          because divisions are expensive.
          p/(1-p) is computed only once and stored in 'p_term'.
        */
-      bin_term = (double) (n-i+1) * ( i<TABSIZE ?
-                   ( inv[i]!=0.0 ? inv[i] : ( inv[i] = 1.0 / (double) i ) ) :
-                   1.0 / (double) i );
+//      bin_term = (float) (n-i+1) * ( i<TABSIZE ?
+//                   ( inv[i]!=0.0 ? inv[i] : ( inv[i] = 1.0 / (float) i ) ) :
+//                   1.0 / (float) i );
+      bin_term = (float) (n-i+1) * ( 1.0 / (float) i );
 
       mult_term = bin_term * p_term;
       term *= mult_term;
@@ -1163,7 +1570,7 @@ static double nfa(int n, int k, double p, double logNT)
              Then, the error on the binomial tail when truncated at
              the i term can be bounded by a geometric series of form
              term_i * sum mult_term_i^j.                            */
-          err = term * ( ( 1.0 - pow( mult_term, (double) (n-i+1) ) ) /
+          err = term * ( ( 1.0 - pow( mult_term, (float) (n-i+1) ) ) /
                          (1.0-mult_term) - 1.0 );
 
           /* One wants an error at most of tolerance*final_result, or:
@@ -1190,13 +1597,13 @@ static double nfa(int n, int k, double p, double logNT)
  */
 struct rect
 {
-  double x1,y1,x2,y2;  /* first and second point of the line segment */
-  double width;        /* rectangle width */
-  double x,y;          /* center of the rectangle */
-  double theta;        /* angle */
-  double dx,dy;        /* (dx,dy) is vector oriented as the line segment */
-  double prec;         /* tolerance angle */
-  double p;            /* probability of a point with angle within 'prec' */
+  float x1,y1,x2,y2;  /* first and second point of the line segment */
+  float width;        /* rectangle width */
+  float x,y;          /* center of the rectangle */
+  float theta;        /* angle */
+  float dx,dy;        /* (dx,dy) is vector oriented as the line segment */
+  float prec;         /* tolerance angle */
+  float p;            /* probability of a point with angle within 'prec' */
 };
 
 /*----------------------------------------------------------------------------*/
@@ -1205,7 +1612,7 @@ struct rect
 static void rect_copy(struct rect * in, struct rect * out)
 {
   /* check parameters */
-  if( in == NULL || out == NULL ) error("rect_copy: invalid 'in' or 'out'.");
+  if( in == NULL || out == NULL ) lsd_error("rect_copy: invalid 'in' or 'out'.");
 
   /* copy values */
   out->x1 = in->x1;
@@ -1280,9 +1687,9 @@ static void rect_copy(struct rect * in, struct rect * out)
  */
 typedef struct
 {
-  double vx[4];  /* rectangle's corner X coordinates in circular order */
-  double vy[4];  /* rectangle's corner Y coordinates in circular order */
-  double ys,ye;  /* start and end Y values of current 'column' */
+  float vx[4];  /* rectangle's corner X coordinates in circular order */
+  float vy[4];  /* rectangle's corner Y coordinates in circular order */
+  float ys,ye;  /* start and end Y values of current 'column' */
   int x,y;       /* coordinates of currently explored pixel */
 } rect_iter;
 
@@ -1296,16 +1703,19 @@ typedef struct
     - x1 <= x
     - x  <= x2
  */
-static double inter_low(double x, double x1, double y1, double x2, double y2)
+static float inter_low(float x, float x1, float y1, float x2, float y2)
 {
   /* check parameters */
-  if( x1 > x2 || x < x1 || x > x2 )
-    error("inter_low: unsuitable input, 'x1>x2' or 'x<x1' or 'x>x2'.");
+//  if( x1 > x2 || x < x1 || x > x2 )
+//    lsd_error("inter_low: unsuitable input, 'x1>x2' or 'x<x1' or 'x>x2'.");
 
   /* interpolation */
   if( double_equal(x1,x2) && y1<y2 ) return y1;
   if( double_equal(x1,x2) && y1>y2 ) return y2;
-  return y1 + (x-x1) * (y2-y1) / (x2-x1);
+//  return y1 + (x-x1) * (y2-y1) / (x2-x1);
+  float result = y1 + (x-x1) * (y2-y1) / (x2-x1);
+  if (isnan(result) || isinf(result)) return (y1<y2) ? y1 : ((y1>y2) ? y2 : 0);
+  return result;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1318,16 +1728,19 @@ static double inter_low(double x, double x1, double y1, double x2, double y2)
     - x1 <= x
     - x  <= x2
  */
-static double inter_hi(double x, double x1, double y1, double x2, double y2)
+static float inter_hi(float x, float x1, float y1, float x2, float y2)
 {
   /* check parameters */
-  if( x1 > x2 || x < x1 || x > x2 )
-    error("inter_hi: unsuitable input, 'x1>x2' or 'x<x1' or 'x>x2'.");
+//  if( x1 > x2 || x < x1 || x > x2 )
+//    lsd_error("inter_hi: unsuitable input, 'x1>x2' or 'x<x1' or 'x>x2'.");
 
   /* interpolation */
   if( double_equal(x1,x2) && y1<y2 ) return y2;
   if( double_equal(x1,x2) && y1>y2 ) return y1;
-  return y1 + (x-x1) * (y2-y1) / (x2-x1);
+//  return y1 + (x-x1) * (y2-y1) / (x2-x1);
+  float result = y1 + (x-x1) * (y2-y1) / (x2-x1);
+  if (isnan(result) || isinf(result)) return (y1<y2) ? y2 : ((y1>y2) ? y1 : 0);
+  return result;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1335,7 +1748,7 @@ static double inter_hi(double x, double x1, double y1, double x2, double y2)
  */
 static void ri_del(rect_iter * iter)
 {
-  if( iter == NULL ) error("ri_del: NULL iterator.");
+  if( iter == NULL ) lsd_error("ri_del: NULL iterator.");
   free( (void *) iter );
 }
 
@@ -1344,15 +1757,15 @@ static void ri_del(rect_iter * iter)
 
     See details in \ref rect_iter
  */
-static int ri_end(rect_iter * i)
+static inline int ri_end(rect_iter * i)
 {
   /* check input */
-  if( i == NULL ) error("ri_end: NULL iterator.");
+//  if( i == NULL ) lsd_error("ri_end: NULL iterator.");
 
   /* if the current x value is larger than the largest
      x value in the rectangle (vx[2]), we know the full
      exploration of the rectangle is finished. */
-  return (double)(i->x) > i->vx[2];
+  return (float)(i->x) > i->vx[2];
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1363,7 +1776,7 @@ static int ri_end(rect_iter * i)
 static void ri_inc(rect_iter * i)
 {
   /* check input */
-  if( i == NULL ) error("ri_inc: NULL iterator.");
+//  if( i == NULL ) lsd_error("ri_inc: NULL iterator.");
 
   /* if not at end of exploration,
      increase y value for next pixel in the 'column' */
@@ -1372,7 +1785,7 @@ static void ri_inc(rect_iter * i)
   /* if the end of the current 'column' is reached,
      and it is not the end of exploration,
      advance to the next 'column' */
-  while( (double) (i->y) > i->ye && !ri_end(i) )
+  while( (float) (i->y) > i->ye && !ri_end(i) )
     {
       /* increase x, next 'column' */
       i->x++;
@@ -1395,10 +1808,10 @@ static void ri_inc(rect_iter * i)
          or last 'columns') then we pick the lower value of the side
          by using 'inter_low'.
        */
-      if( (double) i->x < i->vx[3] )
-        i->ys = inter_low((double)i->x,i->vx[0],i->vy[0],i->vx[3],i->vy[3]);
+      if( (float) i->x < i->vx[3] )
+        i->ys = inter_low((float)i->x,i->vx[0],i->vy[0],i->vx[3],i->vy[3]);
       else
-        i->ys = inter_low((double)i->x,i->vx[3],i->vy[3],i->vx[2],i->vy[2]);
+        i->ys = inter_low((float)i->x,i->vx[3],i->vy[3],i->vx[2],i->vy[2]);
 
       /* update upper y limit (end) for the new 'column'.
 
@@ -1415,10 +1828,10 @@ static void ri_inc(rect_iter * i)
          or last 'columns') then we pick the lower value of the side
          by using 'inter_low'.
        */
-      if( (double)i->x < i->vx[1] )
-        i->ye = inter_hi((double)i->x,i->vx[0],i->vy[0],i->vx[1],i->vy[1]);
+      if( (float)i->x < i->vx[1] )
+        i->ye = inter_hi((float)i->x,i->vx[0],i->vy[0],i->vx[1],i->vy[1]);
       else
-        i->ye = inter_hi((double)i->x,i->vx[1],i->vy[1],i->vx[2],i->vy[2]);
+        i->ye = inter_hi((float)i->x,i->vx[1],i->vy[1],i->vx[2],i->vy[2]);
 
       /* new y */
       i->y = (int) ceil(i->ys);
@@ -1432,16 +1845,16 @@ static void ri_inc(rect_iter * i)
  */
 static rect_iter * ri_ini(struct rect * r)
 {
-  double vx[4],vy[4];
+  float vx[4],vy[4];
   int n,offset;
   rect_iter * i;
 
   /* check parameters */
-  if( r == NULL ) error("ri_ini: invalid rectangle.");
+  if( r == NULL ) lsd_error("ri_ini: invalid rectangle.");
 
   /* get memory */
   i = (rect_iter *) malloc(sizeof(rect_iter));
-  if( i == NULL ) error("ri_ini: Not enough memory.");
+  if( i == NULL ) lsd_error("ri_ini: Not enough memory.");
 
   /* build list of rectangle corners ordered
      in a circular way around the rectangle */
@@ -1490,37 +1903,98 @@ static rect_iter * ri_ini(struct rect * r)
    */
   i->x = (int) ceil(i->vx[0]) - 1;
   i->y = (int) ceil(i->vy[0]);
-  i->ys = i->ye = -DBL_MAX;
+  i->ys = i->ye = -FLT_MAX;
 
   /* advance to the first pixel */
   ri_inc(i);
 
   return i;
 }
+// We don't need to spend time allocating and freeing the interator structure
+// since we only use 1 at a time and it's small enough to safely use as a stack var
+void ri_ini_fast(rect_iter *i, struct rect * r)
+{
+  float vx[4],vy[4];
+  int n,offset;
+
+  /* build list of rectangle corners ordered
+     in a circular way around the rectangle */
+  vx[0] = r->x1 - r->dy * r->width / 2.0;
+  vy[0] = r->y1 + r->dx * r->width / 2.0;
+  vx[1] = r->x2 - r->dy * r->width / 2.0;
+  vy[1] = r->y2 + r->dx * r->width / 2.0;
+  vx[2] = r->x2 + r->dy * r->width / 2.0;
+  vy[2] = r->y2 - r->dx * r->width / 2.0;
+  vx[3] = r->x1 + r->dy * r->width / 2.0;
+  vy[3] = r->y1 - r->dx * r->width / 2.0;
+
+  /* compute rotation of index of corners needed so that the first
+     point has the smaller x.
+
+     if one side is vertical, thus two corners have the same smaller x
+     value, the one with the largest y value is selected as the first.
+   */
+  if( r->x1 < r->x2 && r->y1 <= r->y2 ) offset = 0;
+  else if( r->x1 >= r->x2 && r->y1 < r->y2 ) offset = 1;
+  else if( r->x1 > r->x2 && r->y1 >= r->y2 ) offset = 2;
+  else offset = 3;
+
+  /* apply rotation of index. */
+  for(n=0; n<4; n++)
+    {
+      i->vx[n] = vx[(n+offset) & 3];
+      i->vy[n] = vy[(n+offset) & 3];
+    }
+
+  /* Set an initial condition.
+
+     The values are set to values that will cause 'ri_inc' (that will
+     be called immediately) to initialize correctly the first 'column'
+     and compute the limits 'ys' and 'ye'.
+
+     'y' is set to the integer value of vy[0], the starting corner.
+
+     'ys' and 'ye' are set to very small values, so 'ri_inc' will
+     notice that it needs to start a new 'column'.
+
+     The smallest integer coordinate inside of the rectangle is
+     'ceil(vx[0])'. The current 'x' value is set to that value minus
+     one, so 'ri_inc' (that will increase x by one) will advance to
+     the first 'column'.
+   */
+  i->x = (int) ceil(i->vx[0]) - 1;
+  i->y = (int) ceil(i->vy[0]);
+  i->ys = i->ye = -FLT_MAX;
+
+  /* advance to the first pixel */
+  ri_inc(i);
+
+} /* ri_ini_fast() */
 
 /*----------------------------------------------------------------------------*/
 /** Compute a rectangle's NFA value.
  */
-static double rect_nfa(struct rect * rec, image_double angles, double logNT)
+static float rect_nfa(struct rect * rec, image_int angles, float logNT)
 {
-  rect_iter * i;
+  rect_iter i;
   int pts = 0;
   int alg = 0;
-
+  int xsize = angles->xsize, ysize = angles->ysize;
   /* check parameters */
-  if( rec == NULL ) error("rect_nfa: invalid rectangle.");
-  if( angles == NULL ) error("rect_nfa: invalid 'angles'.");
+//  if( rec == NULL ) lsd_error("rect_nfa: invalid rectangle.");
+//  if( angles == NULL ) lsd_error("rect_nfa: invalid 'angles'.");
 
   /* compute the total number of pixels and of aligned points in 'rec' */
-  for(i=ri_ini(rec); !ri_end(i); ri_inc(i)) /* rectangle iterator */
-    if( i->x >= 0 && i->y >= 0 &&
-        i->x < (int) angles->xsize && i->y < (int) angles->ysize )
+  ri_ini_fast(&i, rec);
+  for(; !ri_end(&i); ri_inc(&i)) /* rectangle iterator */
+    if( i.x >= 0 && i.y >= 0 &&
+        i.x < xsize && i.y < ysize )
       {
         ++pts; /* total number of pixels counter */
-        if( isaligned(i->x, i->y, angles, rec->theta, rec->prec) )
+        if( isaligned_fast((float)angles->data[(i.y*xsize)+i.x], rec->theta, rec->prec) )
           ++alg; /* aligned points counter */
       }
-  ri_del(i); /* delete iterator */
+//  ri_del(i); /* delete iterator */
 
   return nfa(pts,alg,rec->p,logNT); /* compute NFA value */
 }
@@ -1587,32 +2061,32 @@ static double rect_nfa(struct rect * rec, image_double angles, double logNT)
     When |Ixx| > |Iyy| we use the first, otherwise the second (just to
     get better numeric precision).
  */
-static double get_theta( struct point * reg, int reg_size, double x, double y,
-                         image_double modgrad, double reg_angle, double prec )
+static float get_theta( struct lsd_point * reg, int reg_size, float x, float y,
+                         image_int modgrad, float reg_angle, float prec )
 {
-  double lambda,theta,weight;
-  double Ixx = 0.0;
-  double Iyy = 0.0;
-  double Ixy = 0.0;
+  float lambda,theta,weight;
+  float Ixx = 0.0;
+  float Iyy = 0.0;
+  float Ixy = 0.0;
   int i;
 
   /* check parameters */
-  if( reg == NULL ) error("get_theta: invalid region.");
-  if( reg_size <= 1 ) error("get_theta: region size <= 1.");
+  if( reg == NULL ) lsd_error("get_theta: invalid region.");
+  if( reg_size <= 1 ) lsd_error("get_theta: region size <= 1.");
   if( modgrad == NULL || modgrad->data == NULL )
-    error("get_theta: invalid 'modgrad'.");
-  if( prec < 0.0 ) error("get_theta: 'prec' must be positive.");
+    lsd_error("get_theta: invalid 'modgrad'.");
+  if( prec < 0.0 ) lsd_error("get_theta: 'prec' must be positive.");
 
   /* compute inertia matrix */
   for(i=0; i<reg_size; i++)
     {
       weight = modgrad->data[ reg[i].x + reg[i].y * modgrad->xsize ];
-      Ixx += ( (double) reg[i].y - y ) * ( (double) reg[i].y - y ) * weight;
-      Iyy += ( (double) reg[i].x - x ) * ( (double) reg[i].x - x ) * weight;
-      Ixy -= ( (double) reg[i].x - x ) * ( (double) reg[i].y - y ) * weight;
+      Ixx += ( (float) reg[i].y - y ) * ( (float) reg[i].y - y ) * weight;
+      Iyy += ( (float) reg[i].x - x ) * ( (float) reg[i].x - x ) * weight;
+      Ixy -= ( (float) reg[i].x - x ) * ( (float) reg[i].y - y ) * weight;
     }
   if( double_equal(Ixx,0.0) && double_equal(Iyy,0.0) && double_equal(Ixy,0.0) )
-    error("get_theta: null inertia matrix.");
+    lsd_error("get_theta: null inertia matrix.");
 
   /* compute smallest eigenvalue */
   lambda = 0.5 * ( Ixx + Iyy - sqrt( (Ixx-Iyy)*(Ixx-Iyy) + 4.0*Ixy*Ixy ) );
@@ -1630,19 +2104,19 @@ static double get_theta( struct point * reg, int reg_size, double x, double y,
 /*----------------------------------------------------------------------------*/
 /** Computes a rectangle that covers a region of points.
  */
-static void region2rect( struct point * reg, int reg_size,
-                         image_double modgrad, double reg_angle,
-                         double prec, double p, struct rect * rec )
+static void region2rect( struct lsd_point * reg, int reg_size,
+                         image_int modgrad, float reg_angle,
+                         float prec, float p, struct rect * rec )
 {
-  double x,y,dx,dy,l,w,theta,weight,sum,l_min,l_max,w_min,w_max;
+  float x,y,dx,dy,l,w,theta,weight,sum,l_min,l_max,w_min,w_max;
   int i;
-
+  int ix,iy,isum,iweight;
   /* check parameters */
-  if( reg == NULL ) error("region2rect: invalid region.");
-  if( reg_size <= 1 ) error("region2rect: region size <= 1.");
+  if( reg == NULL ) lsd_error("region2rect: invalid region.");
+  if( reg_size <= 1 ) lsd_error("region2rect: region size <= 1.");
   if( modgrad == NULL || modgrad->data == NULL )
-    error("region2rect: invalid image 'modgrad'.");
-  if( rec == NULL ) error("region2rect: invalid 'rec'.");
+    lsd_error("region2rect: invalid image 'modgrad'.");
+  if( rec == NULL ) lsd_error("region2rect: invalid 'rec'.");
 
   /* center of the region:
 
@@ -1654,15 +2128,17 @@ static void region2rect( struct point * reg, int reg_size,
      where G(i) is the norm of the gradient of pixel i
      and x_i,y_i are its coordinates.
    */
-  x = y = sum = 0.0;
+//  x = y = sum = 0.0;
+  ix = iy = isum = 0; // integers are faster since the source data is integer
   for(i=0; i<reg_size; i++)
     {
-      weight = modgrad->data[ reg[i].x + reg[i].y * modgrad->xsize ];
-      x += (double) reg[i].x * weight;
-      y += (double) reg[i].y * weight;
-      sum += weight;
+      iweight = modgrad->data[ reg[i].x + reg[i].y * modgrad->xsize ];
+      ix += reg[i].x * iweight;
+      iy += reg[i].y * iweight;
+      isum += iweight;
     }
-  if( sum <= 0.0 ) error("region2rect: weights sum equal to zero.");
+  if( isum <= 0 ) lsd_error("region2rect: weights sum equal to zero.");
+  x = (float)ix; y = (float)iy; sum = (float)isum;
   x /= sum;
   y /= sum;
 
@@ -1686,8 +2162,8 @@ static void region2rect( struct point * reg, int reg_size,
   l_min = l_max = w_min = w_max = 0.0;
   for(i=0; i<reg_size; i++)
     {
-      l =  ( (double) reg[i].x - x) * dx + ( (double) reg[i].y - y) * dy;
-      w = -( (double) reg[i].x - x) * dy + ( (double) reg[i].y - y) * dx;
+      l =  ( (float) reg[i].x - x) * dx + ( (float) reg[i].y - y) * dy;
+      w = -( (float) reg[i].x - x) * dy + ( (float) reg[i].y - y) * dx;
 
       if( l > l_max ) l_max = l;
       if( l < l_min ) l_min = l;
@@ -1723,65 +2199,104 @@ static void region2rect( struct point * reg, int reg_size,
 /** Build a region of pixels that share the same angle, up to a
     tolerance 'prec', starting at point (x,y).
  */
-static void region_grow( int x, int y, image_double angles, struct point * reg,
-                         int * reg_size, double * reg_angle, image_char used,
-                         double prec )
+static void region_grow( int x, int y, image_int angles, struct lsd_point * reg,
+                         int * reg_size, float * reg_angle, image_char used,
+                         float prec )
 {
-  double sumdx,sumdy;
+  float sumdx,sumdy;
   int xx,yy,i;
-
+  int l_size; // local copy
+  float l_angle; // local copy
+  int xsize = used->xsize;
   /* check parameters */
   if( x < 0 || y < 0 || x >= (int) angles->xsize || y >= (int) angles->ysize )
-    error("region_grow: (x,y) out of the image.");
-  if( angles == NULL || angles->data == NULL )
-    error("region_grow: invalid image 'angles'.");
-  if( reg == NULL ) error("region_grow: invalid 'reg'.");
-  if( reg_size == NULL ) error("region_grow: invalid pointer 'reg_size'.");
-  if( reg_angle == NULL ) error("region_grow: invalid pointer 'reg_angle'.");
-  if( used == NULL || used->data == NULL )
-    error("region_grow: invalid image 'used'.");
+    lsd_error("region_grow: (x,y) out of the image.");
+//  if( angles == NULL || angles->data == NULL )
+//    lsd_error("region_grow: invalid image 'angles'.");
+//  if( reg == NULL ) lsd_error("region_grow: invalid 'reg'.");
+//  if( reg_size == NULL ) lsd_error("region_grow: invalid pointer 'reg_size'.");
+//  if( reg_angle == NULL ) lsd_error("region_grow: invalid pointer 'reg_angle'.");
+//  if( used == NULL || used->data == NULL )
+//    lsd_error("region_grow: invalid image 'used'.");
 
   /* first point of the region */
-  *reg_size = 1;
+  l_size = 1;
   reg[0].x = x;
   reg[0].y = y;
-  *reg_angle = angles->data[x+y*angles->xsize];  /* region's angle */
-  sumdx = cos(*reg_angle);
-  sumdy = sin(*reg_angle);
+  l_angle = degToRad(angles->data[x+y*angles->xsize]);  /* region's angle */
+  sumdx = cos(l_angle);
+  sumdy = sin(l_angle);
   used->data[x+y*used->xsize] = USED;
 
+//    /* try neighbors as new region points */
+//  for(i=0; i<*reg_size; i++)
+//    for(xx=reg[i].x-1; xx<=reg[i].x+1; xx++)
+//      for(yy=reg[i].y-1; yy<=reg[i].y+1; yy++)
+//        if( xx>=0 && yy>=0 && xx<(int)used->xsize && yy<(int)used->ysize &&
+//            used->data[xx+yy*used->xsize] != USED &&
+//            isaligned(xx,yy,angles,*reg_angle,prec) )
+//          {
+//            /* add point */
+//            used->data[xx+yy*used->xsize] = USED;
+//            reg[*reg_size].x = xx;
+//            reg[*reg_size].y = yy;
+//            ++(*reg_size);
+//
+//            /* update region's angle */
+//            sumdx += cos( angles->data[xx+yy*angles->xsize] );
+//            sumdy += sin( angles->data[xx+yy*angles->xsize] );
+//            *reg_angle = atan2(sumdy,sumdx);
+//          }
+//}
   /* try neighbors as new region points */
-  for(i=0; i<*reg_size; i++)
-    for(xx=reg[i].x-1; xx<=reg[i].x+1; xx++)
-      for(yy=reg[i].y-1; yy<=reg[i].y+1; yy++)
-        if( xx>=0 && yy>=0 && xx<(int)used->xsize && yy<(int)used->ysize &&
-            used->data[xx+yy*used->xsize] != USED &&
-            isaligned(xx,yy,angles,*reg_angle,prec) )
+  for(i=0; i<l_size; i++) {
+    int dx=3, dy=3; // assume 3x3 region to try
+    int ty = reg[i].y-1;
+    int tx = reg[i].x-1;
+    if (tx < 0) {
+       tx = 0; dx--;
+    } else if (tx+dx >= xsize) {
+       dx--;
+    }
+    if (ty < 0) {
+       ty = 0; dy--;
+    } else if (ty+dy >= used->ysize) {
+       dy--;
+    }
+    for(xx=tx; xx<tx+dx; xx++)
+      for(yy=ty; yy<ty+dy; yy++)
+        if( used->data[xx+yy*xsize] != USED &&
+            isaligned_fast((float)angles->data[(yy*xsize)+xx],l_angle,prec) )
           {
             /* add point */
-            used->data[xx+yy*used->xsize] = USED;
-            reg[*reg_size].x = xx;
-            reg[*reg_size].y = yy;
-            ++(*reg_size);
-
+            used->data[xx+yy*xsize] = USED;
+            reg[l_size].x = xx;
+            reg[l_size].y = yy;
+            ++l_size;
+//
             /* update region's angle */
-            sumdx += cos( angles->data[xx+yy*angles->xsize] );
-            sumdy += sin( angles->data[xx+yy*angles->xsize] );
-            *reg_angle = atan2(sumdy,sumdx);
+            int16_t angle = angles->data[xx+yy*xsize] % 360;
+            if (angle < 0) angle += 360;
+            sumdx += cos_table[angle];
+            sumdy += sin_table[angle];
+            l_angle = atan2(sumdy,sumdx);
           }
+   }
+   *reg_size = l_size;
+   *reg_angle = l_angle;
 }
 
 /*----------------------------------------------------------------------------*/
 /** Try some rectangles variations to improve NFA value. Only if the
     rectangle is not meaningful (i.e., log_nfa <= log_eps).
  */
-static double rect_improve( struct rect * rec, image_double angles,
-                            double logNT, double log_eps )
+static float rect_improve( struct rect * rec, image_int angles,
+                            float logNT, float log_eps )
 {
   struct rect r;
-  double log_nfa,log_nfa_new;
-  double delta = 0.5;
-  double delta_2 = delta / 2.0;
+  float log_nfa,log_nfa_new;
+  float delta = 0.5;
+  float delta_2 = delta / 2.0;
   int n;
 
   log_nfa = rect_nfa(rec,angles,logNT);
@@ -1888,36 +2403,36 @@ static double rect_improve( struct rect * rec, image_double angles,
     starting point, until that leads to rectangle with the right
     density of region points or to discard the region if too small.
  */
-static int reduce_region_radius( struct point * reg, int * reg_size,
-                                 image_double modgrad, double reg_angle,
-                                 double prec, double p, struct rect * rec,
-                                 image_char used, image_double angles,
-                                 double density_th )
+static int reduce_region_radius( struct lsd_point * reg, int * reg_size,
+                                 image_int modgrad, float reg_angle,
+                                 float prec, float p, struct rect * rec,
+                                 image_char used, image_int angles,
+                                 float density_th )
 {
-  double density,rad1,rad2,rad,xc,yc;
+  float density,rad1,rad2,rad,xc,yc;
   int i;
 
   /* check parameters */
-  if( reg == NULL ) error("reduce_region_radius: invalid pointer 'reg'.");
+  if( reg == NULL ) lsd_error("reduce_region_radius: invalid pointer 'reg'.");
   if( reg_size == NULL )
-    error("reduce_region_radius: invalid pointer 'reg_size'.");
-  if( prec < 0.0 ) error("reduce_region_radius: 'prec' must be positive.");
-  if( rec == NULL ) error("reduce_region_radius: invalid pointer 'rec'.");
+    lsd_error("reduce_region_radius: invalid pointer 'reg_size'.");
+  if( prec < 0.0 ) lsd_error("reduce_region_radius: 'prec' must be positive.");
+  if( rec == NULL ) lsd_error("reduce_region_radius: invalid pointer 'rec'.");
   if( used == NULL || used->data == NULL )
-    error("reduce_region_radius: invalid image 'used'.");
+    lsd_error("reduce_region_radius: invalid image 'used'.");
   if( angles == NULL || angles->data == NULL )
-    error("reduce_region_radius: invalid image 'angles'.");
+    lsd_error("reduce_region_radius: invalid image 'angles'.");
 
   /* compute region points density */
-  density = (double) *reg_size /
+  density = (float) *reg_size /
                          ( dist(rec->x1,rec->y1,rec->x2,rec->y2) * rec->width );
 
   /* if the density criterion is satisfied there is nothing to do */
   if( density >= density_th ) return TRUE;
 
   /* compute region's radius */
-  xc = (double) reg[0].x;
-  yc = (double) reg[0].y;
+  xc = (float) reg[0].x;
+  yc = (float) reg[0].y;
   rad1 = dist( xc, yc, rec->x1, rec->y1 );
   rad2 = dist( xc, yc, rec->x2, rec->y2 );
   rad = rad1 > rad2 ? rad1 : rad2;
@@ -1929,7 +2444,7 @@ static int reduce_region_radius( struct point * reg, int * reg_size,
 
       /* remove points from the region and update 'used' map */
       for(i=0; i<*reg_size; i++)
-        if( dist( xc, yc, (double) reg[i].x, (double) reg[i].y ) > rad )
+        if( dist( xc, yc, (float) reg[i].x, (float) reg[i].y ) > rad )
           {
             /* point not kept, mark it as NOTUSED */
             used->data[ reg[i].x + reg[i].y * used->xsize ] = NOTUSED;
@@ -1948,7 +2463,7 @@ static int reduce_region_radius( struct point * reg, int * reg_size,
       region2rect(reg,*reg_size,modgrad,reg_angle,prec,p,rec);
 
       /* re-compute region points density */
-      density = (double) *reg_size /
+      density = (float) *reg_size /
                          ( dist(rec->x1,rec->y1,rec->x2,rec->y2) * rec->width );
     }
 
@@ -1966,25 +2481,25 @@ static int reduce_region_radius( struct point * reg, int * reg_size,
     produce a rectangle with the right density of region points,
     'reduce_region_radius' is called to try to satisfy this condition.
  */
-static int refine( struct point * reg, int * reg_size, image_double modgrad,
-                   double reg_angle, double prec, double p, struct rect * rec,
-                   image_char used, image_double angles, double density_th )
+static int refine( struct lsd_point * reg, int * reg_size, image_int modgrad,
+                   float reg_angle, float prec, float p, struct rect * rec,
+                   image_char used, image_int angles, float density_th )
 {
-  double angle,ang_d,mean_angle,tau,density,xc,yc,ang_c,sum,s_sum;
+  float angle,ang_d,mean_angle,tau,density,xc,yc,ang_c,sum,s_sum;
   int i,n;
 
   /* check parameters */
-  if( reg == NULL ) error("refine: invalid pointer 'reg'.");
-  if( reg_size == NULL ) error("refine: invalid pointer 'reg_size'.");
-  if( prec < 0.0 ) error("refine: 'prec' must be positive.");
-  if( rec == NULL ) error("refine: invalid pointer 'rec'.");
+  if( reg == NULL ) lsd_error("refine: invalid pointer 'reg'.");
+  if( reg_size == NULL ) lsd_error("refine: invalid pointer 'reg_size'.");
+  if( prec < 0.0 ) lsd_error("refine: 'prec' must be positive.");
+  if( rec == NULL ) lsd_error("refine: invalid pointer 'rec'.");
   if( used == NULL || used->data == NULL )
-    error("refine: invalid image 'used'.");
+    lsd_error("refine: invalid image 'used'.");
   if( angles == NULL || angles->data == NULL )
-    error("refine: invalid image 'angles'.");
+    lsd_error("refine: invalid image 'angles'.");
 
   /* compute region points density */
-  density = (double) *reg_size /
+  density = (float) *reg_size /
                          ( dist(rec->x1,rec->y1,rec->x2,rec->y2) * rec->width );
 
   /* if the density criterion is satisfied there is nothing to do */
@@ -1993,25 +2508,25 @@ static int refine( struct point * reg, int * reg_size, image_double modgrad,
   /*------ First try: reduce angle tolerance ------*/
 
   /* compute the new mean angle and tolerance */
-  xc = (double) reg[0].x;
-  yc = (double) reg[0].y;
-  ang_c = angles->data[ reg[0].x + reg[0].y * angles->xsize ];
+  xc = (float) reg[0].x;
+  yc = (float) reg[0].y;
+  ang_c = degToRad(angles->data[ reg[0].x + reg[0].y * angles->xsize ]);
   sum = s_sum = 0.0;
   n = 0;
   for(i=0; i<*reg_size; i++)
     {
       used->data[ reg[i].x + reg[i].y * used->xsize ] = NOTUSED;
-      if( dist( xc, yc, (double) reg[i].x, (double) reg[i].y ) < rec->width )
+      if( dist( xc, yc, (float) reg[i].x, (float) reg[i].y ) < rec->width )
         {
-          angle = angles->data[ reg[i].x + reg[i].y * angles->xsize ];
+          angle = degToRad(angles->data[ reg[i].x + reg[i].y * angles->xsize ]);
           ang_d = angle_diff_signed(angle,ang_c);
           sum += ang_d;
           s_sum += ang_d * ang_d;
           ++n;
         }
     }
-  mean_angle = sum / (double) n;
-  tau = 2.0 * sqrt( (s_sum - 2.0 * mean_angle * sum) / (double) n
+  mean_angle = sum / (float) n;
+  tau = 2.0 * sqrt( (s_sum - 2.0 * mean_angle * sum) / (float) n
                          + mean_angle*mean_angle ); /* 2 * standard deviation */
 
   /* find a new region from the same starting point and new angle tolerance */
@@ -2024,7 +2539,7 @@ static int refine( struct point * reg, int * reg_size, image_double modgrad,
   region2rect(reg,*reg_size,modgrad,reg_angle,prec,p,rec);
 
   /* re-compute region points density */
-  density = (double) *reg_size /
+  density = (float) *reg_size /
                       ( dist(rec->x1,rec->y1,rec->x2,rec->y2) * rec->width );
 
   /*------ Second try: reduce region radius ------*/
@@ -2044,38 +2559,39 @@ static int refine( struct point * reg, int * reg_size, image_double modgrad,
 /*----------------------------------------------------------------------------*/
 /** LSD full interface.
  */
-double * LineSegmentDetection( int * n_out,
-                               double * img, int X, int Y,
-                               double scale, double sigma_scale, double quant,
-                               double ang_th, double log_eps, double density_th,
+float * LineSegmentDetection( int * n_out,
+                               unsigned char * img, int X, int Y,
+                               float scale, float sigma_scale, float quant,
+                               float ang_th, float log_eps, float density_th,
                                int n_bins,
                                int ** reg_img, int * reg_x, int * reg_y )
 {
-
-  image_double image;
+  image_char image;
   ntuple_list out = new_ntuple_list(7);
-  double * return_value;
-  image_double scaled_image,angles,modgrad;
+  float * return_value;
+  image_int scaled_image,angles,modgrad;
   image_char used;
   image_int region = NULL;
   struct coorlist * list_p;
   void * mem_p;
   struct rect rec;
-  struct point * reg;
+  struct lsd_point * reg;
   int reg_size,min_reg_size,i;
   unsigned int xsize,ysize;
-  double rho,reg_angle,prec,p,log_nfa,logNT;
+  float rho,reg_angle,prec,p,log_nfa,logNT;
   int ls_count = 0;                   /* line segments are numbered 1,2,3,... */
+
+
   /* check parameters */
-  if( img == NULL || X <= 0 || Y <= 0 ) error("invalid image input.");
-  if( scale <= 0.0 ) error("'scale' value must be positive.");
-  if( sigma_scale <= 0.0 ) error("'sigma_scale' value must be positive.");
-  if( quant < 0.0 ) error("'quant' value must be positive.");
+  if( img == NULL || X <= 0 || Y <= 0 ) lsd_error("invalid image input.");
+  if( scale <= 0.0 ) lsd_error("'scale' value must be positive.");
+  if( sigma_scale <= 0.0 ) lsd_error("'sigma_scale' value must be positive.");
+  if( quant < 0.0 ) lsd_error("'quant' value must be positive.");
   if( ang_th <= 0.0 || ang_th >= 180.0 )
-    error("'ang_th' value must be in the range (0,180).");
+    lsd_error("'ang_th' value must be in the range (0,180).");
   if( density_th < 0.0 || density_th > 1.0 )
-    error("'density_th' value must be in the range [0,1].");
-  if( n_bins <= 0 ) error("'n_bins' value must be positive.");
+    lsd_error("'density_th' value must be in the range [0,1].");
+  if( n_bins <= 0 ) lsd_error("'n_bins' value must be positive.");
 
 
   /* angle tolerance */
@@ -2085,15 +2601,15 @@ double * LineSegmentDetection( int * n_out,
 
 
   /* load and scale image (if necessary) and compute angle at each pixel */
-  image = new_image_double_ptr( (unsigned int) X, (unsigned int) Y, img );
-  if( scale != 1.0 )
-    {
-      scaled_image = gaussian_sampler( image, scale, sigma_scale );
-      angles = ll_angle( scaled_image, rho, &list_p, &mem_p,
-                         &modgrad, (unsigned int) n_bins );
-      free_image_double(scaled_image);
-    }
-  else
+  image = new_image_char_ptr( (unsigned int) X, (unsigned int) Y, img );
+//  if( scale != 1.0 )
+//    {
+//      scaled_image = gaussian_sampler( image, scale, sigma_scale );
+//      angles = ll_angle( scaled_image, rho, &list_p, &mem_p,
+//                         &modgrad, (unsigned int) n_bins );
+//      free_image_double(scaled_image);
+//    }
+//  else
     angles = ll_angle( image, rho, &list_p, &mem_p, &modgrad,
                        (unsigned int) n_bins );
   xsize = angles->xsize;
@@ -2112,25 +2628,26 @@ double * LineSegmentDetection( int * n_out,
      whose logarithm value is
        log10(11) + 5/2 * (log10(X) + log10(Y)).
   */
-  logNT = 5.0 * ( log10( (double) xsize ) + log10( (double) ysize ) ) / 2.0
+  logNT = 5.0 * ( log10( (float) xsize ) + log10( (float) ysize ) ) / 2.0
           + log10(11.0);
   min_reg_size = (int) (-logNT/log10(p)); /* minimal number of points in region
                                              that can give a meaningful event */
 
 
-  /* initialize some structures */
-  if( reg_img != NULL && reg_x != NULL && reg_y != NULL ) /* save region data */
-    region = new_image_int_ini(angles->xsize,angles->ysize,0);
+//  /* initialize some structures */
+//  if( reg_img != NULL && reg_x != NULL && reg_y != NULL ) /* save region data */
+//    region = new_image_int_ini(angles->xsize,angles->ysize,0);
   used = new_image_char_ini(xsize,ysize,NOTUSED);
-  reg = (struct point *) calloc( (size_t) (xsize*ysize), sizeof(struct point) );
-  if( reg == NULL ) error("not enough memory!");
+  reg = (struct lsd_point *) calloc( (size_t) (xsize*ysize), sizeof(struct lsd_point) );
+  if( reg == NULL ) lsd_error("not enough memory!");
 
 
   /* search for line segments */
   for(; list_p != NULL; list_p = list_p->next )
     if( used->data[ list_p->x + list_p->y * used->xsize ] == NOTUSED &&
-        angles->data[ list_p->x + list_p->y * angles->xsize ] != NOTDEF )
-       /* there is no risk of double comparison problems here
+        angles->data[ list_p->x + list_p->y * angles->xsize ] != NOTDEF_INT )
+//        degToRad(angles->data[ list_p->x + list_p->y * angles->xsize ]) != NOTDEF )
+       /* there is no risk of float comparison problems here
           because we are only interested in the exact NOTDEF value */
       {
         /* find the region of connected point and ~equal angle */
@@ -2171,52 +2688,52 @@ double * LineSegmentDetection( int * n_out,
         rec.x2 += 0.5; rec.y2 += 0.5;
 
         /* scale the result values if a subsampling was performed */
-        if( scale != 1.0 )
-          {
-            rec.x1 /= scale; rec.y1 /= scale;
-            rec.x2 /= scale; rec.y2 /= scale;
-            rec.width /= scale;
-          }
+//        if( scale != 1.0 )
+//          {
+//            rec.x1 /= scale; rec.y1 /= scale;
+//            rec.x2 /= scale; rec.y2 /= scale;
+//            rec.width /= scale;
+//          }
 
         /* add line segment found to output */
         add_7tuple( out, rec.x1, rec.y1, rec.x2, rec.y2,
                          rec.width, rec.p, log_nfa );
 
-        /* add region number to 'region' image if needed */
-        if( region != NULL )
-          for(i=0; i<reg_size; i++)
-            region->data[ reg[i].x + reg[i].y * region->xsize ] = ls_count;
+//        /* add region number to 'region' image if needed */
+//        if( region != NULL )
+//          for(i=0; i<reg_size; i++)
+//            region->data[ reg[i].x + reg[i].y * region->xsize ] = ls_count;
       }
 
 
   /* free memory */
-  free( (void *) image );   /* only the double_image structure should be freed,
+  free( (void *) image );   /* only the char_image structure should be freed,
                                the data pointer was provided to this functions
                                and should not be destroyed.                 */
-  free_image_double(angles);
-  free_image_double(modgrad);
+  free_image_int(angles);
+  free_image_int(modgrad);
   free_image_char(used);
   free( (void *) reg );
   free( (void *) mem_p );
 
-  /* return the result */
-  if( reg_img != NULL && reg_x != NULL && reg_y != NULL )
-    {
-      if( region == NULL ) error("'region' should be a valid image.");
-      *reg_img = region->data;
-      if( region->xsize > (unsigned int) INT_MAX ||
-          region->xsize > (unsigned int) INT_MAX )
-        error("region image to big to fit in INT sizes.");
-      *reg_x = (int) (region->xsize);
-      *reg_y = (int) (region->ysize);
+//  /* return the result */
+//  if( reg_img != NULL && reg_x != NULL && reg_y != NULL )
+//    {
+//      if( region == NULL ) lsd_error("'region' should be a valid image.");
+//      *reg_img = region->data;
+//      if( region->xsize > (unsigned int) INT_MAX ||
+//          region->xsize > (unsigned int) INT_MAX )
+//        lsd_error("region image to big to fit in INT sizes.");
+//      *reg_x = (int) (region->xsize);
+//      *reg_y = (int) (region->ysize);
 
-      /* free the 'region' structure.
-         we cannot use the function 'free_image_int' because we need to keep
-         the memory with the image data to be returned by this function. */
-      free( (void *) region );
-    }
+//      /* free the 'region' structure.
+//         we cannot use the function 'free_image_int' because we need to keep
+//         the memory with the image data to be returned by this function. */
+//      free( (void *) region );
+//    }
   if( out->size > (unsigned int) INT_MAX )
-    error("too many detections to fit in an INT.");
+    lsd_error("too many detections to fit in an INT.");
   *n_out = (int) (out->size);
 
   return_value = out->values;
@@ -2230,18 +2747,18 @@ double * LineSegmentDetection( int * n_out,
 /*----------------------------------------------------------------------------*/
 /** LSD Simple Interface with Scale and Region output.
  */
-double * lsd_scale_region( int * n_out,
-                           double * img, int X, int Y, double scale,
+float * lsd_scale_region( int * n_out,
+                           unsigned char * img, int X, int Y, float scale,
                            int ** reg_img, int * reg_x, int * reg_y )
 {
   /* LSD parameters */
-  double sigma_scale = 0.6; /* Sigma for Gaussian filter is computed as
+  float sigma_scale = 0.6; /* Sigma for Gaussian filter is computed as
                                 sigma = sigma_scale/scale.                    */
-  double quant = 2.0;       /* Bound to the quantization error on the
+  float quant = 2.0;       /* Bound to the quantization error on the
                                 gradient norm.                                */
-  double ang_th = 22.5;     /* Gradient angle tolerance in degrees.           */
-  double log_eps = 0.0;     /* Detection threshold: -log10(NFA) > log_eps     */
-  double density_th = 0.7;  /* Minimal density of region points in rectangle. */
+  float ang_th = 22.5;     /* Gradient angle tolerance in degrees.           */
+  float log_eps = 0.0;     /* Detection threshold: -log10(NFA) > log_eps     */
+  float density_th = 0.7;  /* Minimal density of region points in rectangle. */
   int n_bins = 1024;        /* Number of bins in pseudo-ordering of gradient
                                modulus.                                       */
 
@@ -2253,7 +2770,7 @@ double * lsd_scale_region( int * n_out,
 /*----------------------------------------------------------------------------*/
 /** LSD Simple Interface with Scale.
  */
-double * lsd_scale(int * n_out, double * img, int X, int Y, double scale)
+float * lsd_scale(int * n_out, unsigned char * img, int X, int Y, float scale)
 {
   return lsd_scale_region(n_out,img,X,Y,scale,NULL,NULL,NULL);
 }
@@ -2261,38 +2778,38 @@ double * lsd_scale(int * n_out, double * img, int X, int Y, double scale)
 /*----------------------------------------------------------------------------*/
 /** LSD Simple Interface.
  */
-double * lsd(int * n_out, double * img, int X, int Y)
+float * lsd(int * n_out, unsigned char * img, int X, int Y)
 {
   /* LSD parameters */
-  double scale = 0.8;       /* Scale the image by Gaussian filter to 'scale'. */
+  float scale = 0.8;       /* Scale the image by Gaussian filter to 'scale'. */
 
   return lsd_scale(n_out,img,X,Y,scale);
 }
 /*----------------------------------------------------------------------------*/
 
-typedef struct lines_double_s{
-  double * data;
+typedef struct lines_float_s{
+  float * data;
   int size;
 
-  void assign(int index, double (& other)[4]){
+  void assign(int index, float (& other)[4]){
     data[index*4+0] = other[0];
     data[index*4+1] = other[1];
     data[index*4+2] = other[2];
     data[index*4+3] = other[3];
   };
-} * lines_double;
+} * lines_float;
 
 
-static lines_double new_lines_double(int xsize){
-  lines_double lines;
+static lines_float new_lines_float(int xsize){
+  lines_float lines;
 
   /* check parameters */
-  if( xsize == 0) error("new_lines_double: invalid image size.");
+  if( xsize == 0) lsd_error("new_lines_float: invalid image size.");
 
   /* get memory */
-  lines = (lines_double) malloc( sizeof(struct lines_double_s) );
-  if( lines == NULL ) error("double: not enough memory.");
-  lines->data = (double *) calloc( (size_t) (xsize), sizeof(double) );
+  lines = (lines_float) malloc( sizeof(struct lines_float_s) );
+  if( lines == NULL ) lsd_error("float: not enough memory.");
+  lines->data = (float *) calloc( (size_t) (xsize), sizeof(float) );
 
   /* set image size */
   lines->size = xsize;
@@ -2301,14 +2818,14 @@ static lines_double new_lines_double(int xsize){
 }
 
 
-void reduce_parallel(double (*lines)[4], int& n_out){
+void reduce_parallel(float (*lines)[4], int& n_out){
   /*  Reduce neighbouring parallel lines to a averaged line
    *  LSD detects two lines when the image has clear b/w patterns w. 
    *  strong gradients like preprocessed edge images or a go board
    *  @param lines: Pointer to the lines detected by LSD
    *  @param n_out: Refrence to the number of lines
    */
-  typedef Eigen::MatrixXd Matrix;
+  typedef Eigen::MatrixXf Matrix;
   typedef knncpp::Matrixi Matrixi;
   Matrix data(2, n_out);
 
@@ -2319,7 +2836,7 @@ void reduce_parallel(double (*lines)[4], int& n_out){
   }
 
 
-  knncpp::KDTreeMinkowskiX<double, knncpp::EuclideanDistance<double>> kdtree(data);
+  knncpp::KDTreeMinkowskiX<float, knncpp::EuclideanDistance<float>> kdtree(data);
 
   kdtree.setBucketSize(16);
   kdtree.setSorted(true);
@@ -2333,7 +2850,7 @@ void reduce_parallel(double (*lines)[4], int& n_out){
   //query with datapoints
   kdtree.query(data, 2, indices, distances);
 
-  double (*merged)[4] = new double[n_out][4];
+  float (*merged)[4] = new float[n_out][4];
   int i = 0;
   int matched = 0;
   bool not_done [n_out] = {};
@@ -2341,27 +2858,31 @@ void reduce_parallel(double (*lines)[4], int& n_out){
     not_done[i] = true;
   }
 
+  std::cout << "Before parallel " << n_out << std::endl;
+
   for(i=0; i<n_out; ++i){
     if (not_done[i] && distances(1,i) < 10 && distances(1,i) != -1){
-      double * arr = merge_lines_parallel(lines, i, indices(1,i));
-      memcpy(merged[matched], arr, 4*sizeof(double));
+      float * arr = merge_lines_parallel(lines, i, indices(1,i));
+      memcpy(merged[matched], arr, 4*sizeof(float));
       free(arr);
       not_done[indices(1,i)] = false;
       not_done[i] = false;
       matched++;
     }
   }
+ /* 
   for(i=0; i<n_out; ++i){
     if (not_done[i]){
       //remaining
-      memcpy(merged[matched], lines[i], 4*sizeof(double));
+      memcpy(merged[matched], lines[i], 4*sizeof(float));
       matched++;
     }
   }
+  */
   
   n_out = matched;
   for(i=0; i<matched; ++i){
-    memcpy(lines[i], merged[i], 4*sizeof(double));
+    memcpy(lines[i], merged[i], 4*sizeof(float));
   }
   free(merged);
 
@@ -2370,20 +2891,21 @@ void reduce_parallel(double (*lines)[4], int& n_out){
     LD.draw(lines, n_out, std::string("after red parallel"));
   #endif
 
+  std::cout << "After parallel " << matched << std::endl;
 
 }
 
-double* merge_lines_parallel(const double (*lines)[4], const int idx_a, const int idx_b){
+float* merge_lines_parallel(const float (*lines)[4], const int idx_a, const int idx_b){
   // merges lines on idx_a and idx_b into a new line located at idx_a
   // idx_b is free to use otherwise -> we do not cleanup here
 
-  double dx1 = lines[idx_a][0] - lines[idx_b][0];
-  double dx2 = lines[idx_a][0] - lines[idx_b][2];
-  double dy1 = lines[idx_a][1] - lines[idx_b][1];
-  double dy2 = lines[idx_a][1] - lines[idx_b][3];
-  double d1 = sqrt(dx1*dx1 + dy1*dy1);
-  double d2 = sqrt(dx2*dx2 + dy2*dy2);
-  double (*new_line) = new double[4];
+  float dx1 = lines[idx_a][0] - lines[idx_b][0];
+  float dx2 = lines[idx_a][0] - lines[idx_b][2];
+  float dy1 = lines[idx_a][1] - lines[idx_b][1];
+  float dy2 = lines[idx_a][1] - lines[idx_b][3];
+  float d1 = sqrt(dx1*dx1 + dy1*dy1);
+  float d2 = sqrt(dx2*dx2 + dy2*dy2);
+  float (*new_line) = new float[4];
 
   if (d1 < d2){
     new_line[0] = (lines[idx_a][0]+lines[idx_b][0])/2;
@@ -2399,15 +2921,15 @@ double* merge_lines_parallel(const double (*lines)[4], const int idx_a, const in
   return new_line;
 }
 
-double* cdist(double(*line)[4], const int size, const int x_a, const int y_a, const int x_b, const int y_b){
-  image_double out = new_image_double(size, size);
-  //double* out = new double[size][size];
+float* cdist(float(*line)[4], const int size, const int x_a, const int y_a, const int x_b, const int y_b){
+  image_float out = new_image_float(size, size);
+  //float* out = new float[size][size];
   for(int i=0; i<size; ++i){
     // we only need half the distances, as we can mirror the other half
     for(int j=i; j<(size); ++j){
-      double dx = (line[i][x_a]-line[j][x_b]);
-      double dy = (line[i][y_a]-line[j][y_b]);
-      double dst = sqrt(dx*dx + dy*dy);
+      float dx = (line[i][x_a]-line[j][x_b]);
+      float dy = (line[i][y_a]-line[j][y_b]);
+      float dst = sqrt(dx*dx + dy*dy);
       out->data[i*size+j] = dst;
       out->data[j*size+j] = dst;
     }
@@ -2416,16 +2938,16 @@ double* cdist(double(*line)[4], const int size, const int x_a, const int y_a, co
 }
 
 
-double * calculate_pairwise_distances(double(*lines)[4], const int size){
-  double* dist   = cdist(lines, size, 0, 1, 0, 1);
-  double* dist_b = cdist(lines, size, 0, 1, 2, 3);
-  double* dist_c = cdist(lines, size, 2, 3, 0, 1);
-  double* dist_d = cdist(lines, size, 2, 3, 2, 3);
+float * calculate_pairwise_distances(float(*lines)[4], const int size){
+  float* dist   = cdist(lines, size, 0, 1, 0, 1);
+  float* dist_b = cdist(lines, size, 0, 1, 2, 3);
+  float* dist_c = cdist(lines, size, 2, 3, 0, 1);
+  float* dist_d = cdist(lines, size, 2, 3, 2, 3);
 
 
   for (int i=0; i<size; ++i){
     for(int j=i; j<size; ++j){
-      double val = std::min({dist[i*size+j],
+      float val = std::min({dist[i*size+j],
                              dist_b[i*size+j],
                              dist_c[i*size+j],
                              dist_d[i*size+j]});
@@ -2433,9 +2955,9 @@ double * calculate_pairwise_distances(double(*lines)[4], const int size){
       dist[j*size+i] = val;
     }
   }
-  // set distance to own node to double_max
+  // set distance to own node to float_max
   for (int i=0; i<size; ++i){
-    dist[i*size+i] = std::numeric_limits<double>::max();
+    dist[i*size+i] = std::numeric_limits<float>::max();
   };
   free(dist_b);
   free(dist_c);
@@ -2443,16 +2965,16 @@ double * calculate_pairwise_distances(double(*lines)[4], const int size){
   return dist;
 }
 
-double * get_angles(double(*lines)[4], const int size){
-  double* angles = new double[size];
+float * get_angles(float(*lines)[4], const int size){
+  float* angles = new float[size];
   for(int i=0; i<size; ++i){
-    double dx1 = lines[i][0] - lines[i][2];
-    double dy1 = lines[i][1] - lines[i][3];
+    float dx1 = lines[i][0] - lines[i][2];
+    float dy1 = lines[i][1] - lines[i][3];
 
-    double dx2 = lines[i][2] - lines[i][0];
-    double dy2 = lines[i][3] - lines[i][1];
-    double a1 = atan2(dy1,dx1);
-    double a2 = atan2(dy2,dx2);
+    float dx2 = lines[i][2] - lines[i][0];
+    float dy2 = lines[i][3] - lines[i][1];
+    float a1 = atan2(dy1,dx1);
+    float a2 = atan2(dy2,dx2);
     angles[i] = a1;
     if (a1 > M_PI/2){
       angles[i] = a2;
@@ -2467,14 +2989,14 @@ double * get_angles(double(*lines)[4], const int size){
 
 
 
-lines_t* reduce_graph(double (*lines)[4], int& size){
-  double * angles = get_angles(lines, size);
+lines_t* reduce_graph(float (*lines)[4], int& size){
+  float * angles = get_angles(lines, size);
   // cluster angles 
   int * cluster_id = cluster_angles(angles, size);
   free(angles);
 
-  double (*lines_v)[4] = new double[size][4];
-  double (*lines_h)[4] = new double[size][4];
+  float (*lines_v)[4] = new float[size][4];
+  float (*lines_h)[4] = new float[size][4];
   int len_v=0;
   int len_h=0;
 
@@ -2490,21 +3012,21 @@ lines_t* reduce_graph(double (*lines)[4], int& size){
   }
   free(cluster_id);
 
-  double (*reduced_v)[4]  = new double[len_v][4];
-  double (*reduced_h)[4]  = new double[len_h][4];
+  float (*reduced_v)[4]  = new float[len_v][4];
+  float (*reduced_h)[4]  = new float[len_h][4];
 
-  double* dist_v = calculate_pairwise_distances(lines_v, len_v);
-  double* dist_h = calculate_pairwise_distances(lines_h, len_h);
+  float* dist_v = calculate_pairwise_distances(lines_v, len_v);
+  float* dist_h = calculate_pairwise_distances(lines_h, len_h);
 
- // #ifndef NDEBUG
- //   LD.draw(lines_v, len_v, std::string("Lines_V"));
- //   LD.draw(lines_h, len_h, std::string("Lines_H"));
- // #endif
+  #ifndef NDEBUG
+    LD.draw(lines_v, len_v, std::string("Lines_V"));
+    LD.draw(lines_h, len_h, std::string("Lines_H"));
+  #endif
 
   // determine distance threshhold by avg min dist
-  double thresh_v = calculate_distance_thresh(dist_v, len_v);
-  double thresh_h = calculate_distance_thresh(dist_h, len_h);
-  double thresh = std::min({thresh_v,thresh_h});
+  float thresh_v = calculate_distance_thresh(dist_v, len_v);
+  float thresh_h = calculate_distance_thresh(dist_h, len_h);
+  float thresh = std::min({thresh_v,thresh_h});
   #ifndef NDEBUG
   std::cout << "THRESH " << thresh << std::endl;
   #endif
@@ -2512,10 +3034,10 @@ lines_t* reduce_graph(double (*lines)[4], int& size){
   len_v = reduce_lines(lines_v, len_v, dist_v, len_v, reduced_v, thresh);
   len_h = reduce_lines(lines_h, len_h, dist_h, len_h, reduced_h, thresh);
 
-//  #ifndef NDEBUG
-//    LD.draw(reduced_v, len_v, std::string("Reduced_V"));
-//    LD.draw(reduced_h, len_h, std::string("Reduced_H"));
-//  #endif
+  #ifndef NDEBUG
+    LD.draw(reduced_v, len_v, std::string("Reduced_V"));
+    LD.draw(reduced_h, len_h, std::string("Reduced_H"));
+  #endif
 
   free(dist_v);
   free(dist_h);
@@ -2524,7 +3046,7 @@ lines_t* reduce_graph(double (*lines)[4], int& size){
   return new lines_t(reduced_v, reduced_h, len_v, len_h);
 }
 
-int reduce_lines(double (*lines)[4], const int len, double * dist, const int size, double(*reduced)[4], double thresh){
+int reduce_lines(float (*lines)[4], const int len, float * dist, const int size, float(*reduced)[4], float thresh){
   std::vector<int> visited;
   std::vector<int> matched;
   std::vector<int> end_idx;
@@ -2545,17 +3067,17 @@ int reduce_lines(double (*lines)[4], const int len, double * dist, const int siz
     if (group_id[cur] == -1){
       visited.push_back(cur);
       S.push_back(cur);
-      //#ifndef NDEBUG
-      //    LD.draw(lines[cur], std::string(""), cv::Scalar(255,0,0));
-      //#endif
+      #ifndef NDEBUG
+          LD.draw(lines[cur], std::string(""), cv::Scalar(255,0,0));
+      #endif
       while(true){
         group_id[cur] = id;
         int next_node = __next_node(cur, dist, size, visited, thresh);
 
         if (next_node != -1){
-          //#ifndef NDEBUG
-          //    LD.draw(lines[next_node], std::string(""));
-          //#endif
+          #ifndef NDEBUG
+              LD.draw(lines[next_node], std::string(""));
+          #endif
           matched.push_back(cur);
           visited.push_back(next_node);
           if (__next_node(next_node, dist, size, visited, thresh)!= -1)
@@ -2593,9 +3115,9 @@ int reduce_lines(double (*lines)[4], const int len, double * dist, const int siz
                          lines[edge_lines.back()],
                          reduced[id]);
     
-    //#ifndef NDEBUG
-    //  LD.draw(reduced[id], std::string(""));
-    //#endif
+    #ifndef NDEBUG
+      LD.draw(reduced[id], std::string(""));
+    #endif
 
     edge_lines.clear();
     visited = matched;
@@ -2606,9 +3128,9 @@ int reduce_lines(double (*lines)[4], const int len, double * dist, const int siz
 
 
 
-int argmin(const double* dist, const int row, const int size){
+int argmin(const float* dist, const int row, const int size){
   // TODO: reduce search load by reduction of the dist array using the threshold
-  double val_min = std::numeric_limits<double>::max();
+  float val_min = std::numeric_limits<float>::max();
   int arg = 0;
 
   for(int i=0; i<size; ++i){
@@ -2620,9 +3142,9 @@ int argmin(const double* dist, const int row, const int size){
   return arg;
 }
 
-int argmax(const double** dist, const int row, const int size){
+int argmax(const float** dist, const int row, const int size){
   // TODO: reduce search load by reduction of the dist array using the threshold
-  double val_max = 0;
+  float val_max = 0;
   int arg = 0;
 
   for(int i=0; i<size; ++i){
@@ -2645,13 +3167,13 @@ bool is_in(std::vector<int> & visited, const int val){
 
 
 int __next_node(const int cur_idx, 
-                double * dist, 
+                float * dist, 
                 const int size,
                 std::vector<int> & visited,
-                double THRESH){
+                float THRESH){
   int next_idx = -1;
   while(true){
-    next_idx = argmin((const double*) dist, cur_idx, size);
+    next_idx = argmin((const float*) dist, cur_idx, size);
     if (dist[cur_idx*size+next_idx] > THRESH){
       visited.push_back(next_idx);
       return -1;
@@ -2660,29 +3182,29 @@ int __next_node(const int cur_idx,
       return next_idx;
     }else{
       visited.push_back(next_idx);
-      dist[cur_idx*size+next_idx] = std::numeric_limits<double>::max();
+      dist[cur_idx*size+next_idx] = std::numeric_limits<float>::max();
     }
   }
 }
 
-void merge_lines_max_dist(const double (&l1)[4],  const double (&l2)[4], double (&out)[4]){
-    double dx1 = l1[0] - l2[0];
-    double dx2 = l1[0] - l2[2];
-    double dx3 = l1[2] - l2[0];
-    double dx4 = l1[2] - l2[2];
-                              ;
-    double dy1 = l1[1] - l2[1];
-    double dy2 = l1[1] - l2[3];
-    double dy3 = l1[3] - l2[1];
-    double dy4 = l1[3] - l2[3];
-
-    double d1 = sqrt(dx1*dx1 + dy1*dy1);
-    double d2 = sqrt(dx2*dx2 + dy2*dy2);
-    double d3 = sqrt(dx3*dx3 + dy3*dy3);
-    double d4 = sqrt(dx4*dx4 + dy4*dy4);   
-    std::array<double, 4> distances = {d1,d2,d3,d4};
+void merge_lines_max_dist(const float (&l1)[4],  const float (&l2)[4], float (&out)[4]){
+    float dx1 = l1[0] - l2[0];
+    float dx2 = l1[0] - l2[2];
+    float dx3 = l1[2] - l2[0];
+    float dx4 = l1[2] - l2[2];
     
-    std::array<double,4>::iterator max = std::max_element(distances.begin(), distances.end());
+    float dy1 = l1[1] - l2[1];
+    float dy2 = l1[1] - l2[3];
+    float dy3 = l1[3] - l2[1];
+    float dy4 = l1[3] - l2[3];
+
+    float d1 = sqrt(dx1*dx1 + dy1*dy1);
+    float d2 = sqrt(dx2*dx2 + dy2*dy2);
+    float d3 = sqrt(dx3*dx3 + dy3*dy3);
+    float d4 = sqrt(dx4*dx4 + dy4*dy4);   
+    std::array<float, 4> distances = {d1,d2,d3,d4};
+    
+    std::array<float,4>::iterator max = std::max_element(distances.begin(), distances.end());
     int max_dist_idx = std::distance(distances.begin(), max);
 
     switch(max_dist_idx){
@@ -2713,7 +3235,9 @@ void merge_lines_max_dist(const double (&l1)[4],  const double (&l2)[4], double 
     };
 }
 
-lines_t* lsd_with_line_merge(double * img, int X, int Y){
+
+
+lines_t* lsd_with_line_merge(unsigned char * img, int X, int Y){
   if (X == 0 || Y == 0){
     return new lines_t(nullptr, 
                        nullptr,
@@ -2725,9 +3249,9 @@ lines_t* lsd_with_line_merge(double * img, int X, int Y){
     LD.setImg(img, Y, X);
   #endif
 
-  double* out = lsd(n_out, img, X, Y);
+  float* out = lsd(n_out, img, X, Y);
 
-  double (*lines)[4] = new double[*n_out][4];
+  float (*lines)[4] = new float[*n_out][4];
 
   for(int i=0; i<*n_out; ++i){
     lines[i][0] = out[i*7+0];
@@ -2756,10 +3280,10 @@ void free_memory(void* ptr){
   free(ptr);
 }
 
-double calculate_distance_thresh(const double* dist, const int size){
-  double min_ [size];
+float calculate_distance_thresh(const float* dist, const int size){
+  float min_ [size];
   for(int i=0;i<size;++i){
-    min_[i] = std::numeric_limits<double>::max();
+    min_[i] = std::numeric_limits<float>::max();
   }
 
   for(int i=0; i<size;++i){
@@ -2769,13 +3293,12 @@ double calculate_distance_thresh(const double* dist, const int size){
       }
     }
   }
-  double med = sstats::median(min_, size);
-  //double std = sstats::std(min_, size);
+  float med = sstats::median(min_, size);
+  //float std = sstats::std(min_, size);
   #ifndef NDEBUG
     std::cout << "MED: " << med <<std::endl;//<< "STD: " << std << std::endl;
   #endif
-  double ret = 1.5*med;//+std; 
+  float ret = 1.7*med;//+std; 
 
   return ret;
 }
-

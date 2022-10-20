@@ -11,8 +11,8 @@ static void error(char * msg)
   exit(EXIT_FAILURE);
 }
 
-double sstats::max(const double* list, const int size){
-  double max_ = 0;
+float sstats::max(const float* list, const int size){
+  float max_ = 0;
   for(int i=0; i<size; ++i){
     if (list[i] > max_){
       max_ = list[i];
@@ -22,8 +22,8 @@ double sstats::max(const double* list, const int size){
 }
 
 
-double sstats::min(const double* list, const int size){
-  double min_ = std::numeric_limits<double>::max();
+float sstats::min(const float* list, const int size){
+  float min_ = std::numeric_limits<float>::max();
   for(int i=0; i<size; ++i){
     if (list[i] < min_){
       min_ = list[i];
@@ -32,9 +32,9 @@ double sstats::min(const double* list, const int size){
   return min_;
 }
 
-sstats::MINMAX sstats::minmax(const double* list, const int size){
-  double min_ = std::numeric_limits<double>::max();
-  double max_ = 0;
+sstats::MINMAX sstats::minmax(const float* list, const int size){
+  float min_ = std::numeric_limits<float>::max();
+  float max_ = 0;
   for(int i=0; i<size; ++i){
     if (list[i] < min_){
       min_ = list[i];
@@ -48,18 +48,18 @@ sstats::MINMAX sstats::minmax(const double* list, const int size){
 
 
 
-double sstats::mean(const double* arr, const int size){
-  double sum=0.;
+float sstats::mean(const float* arr, const int size){
+  float sum=0.;
   for(int i=0;i<size;++i){
     sum += arr[i];
   }
-  double mean = (sum/size);
+  float mean = (sum/size);
   return mean;
 }
 
-double sstats::std(const double* arr, const int size){
-  double mean = sstats::mean(arr, size);
-  double var=0.;
+float sstats::std(const float* arr, const int size){
+  float mean = sstats::mean(arr, size);
+  float var=0.;
   for(int i=0;i<size;++i){
     var += (arr[i]-mean)*(arr[i]-mean);
   }
@@ -69,13 +69,13 @@ double sstats::std(const double* arr, const int size){
 
 
 
-sstats::M_STD sstats::mean_std(const double* arr, const int size){
-  double sum=0.;
+sstats::M_STD sstats::mean_std(const float* arr, const int size){
+  float sum=0.;
   for(int i=0;i<size;++i){
     sum += arr[i];
   }
-  double mean = (sum/size);
-  double var=0.;
+  float mean = (sum/size);
+  float var=0.;
   for(int i=0;i<size;++i){
     var += (arr[i]-mean)*(arr[i]-mean);
   }
@@ -85,9 +85,9 @@ sstats::M_STD sstats::mean_std(const double* arr, const int size){
 
 
 
-double sstats::median(const double* list, const int size){
+float sstats::median(const float* list, const int size){
   // local copy of list
-    double* cpy_list = new double[size];
+    float* cpy_list = new float[size];
     for(int i=0; i<size; ++i){
       cpy_list[i] = list[i];
       //std::cout << cpy_list[i] << std::endl;
@@ -96,27 +96,27 @@ double sstats::median(const double* list, const int size){
     if (size % 2 == 1){
         return sstats::__quickselect(cpy_list, size, size/2);
     }else{
-        double * cpy_list_2 = new double[size];
-        memcpy(cpy_list_2, cpy_list, size*sizeof(double));
-        double m1 = sstats::__quickselect(cpy_list, size, size/2-1);
-        double m2 = sstats::__quickselect(cpy_list_2, size, size/2);
+        float * cpy_list_2 = new float[size];
+        memcpy(cpy_list_2, cpy_list, size*sizeof(float));
+        float m1 = sstats::__quickselect(cpy_list, size, size/2-1);
+        float m2 = sstats::__quickselect(cpy_list_2, size, size/2);
         return (m1+m2)/2;
     }
 }
 
-double sstats::__quickselect(double* list, const int size, const int k){
+float sstats::__quickselect(float* list, const int size, const int k){
     if (size <= 5){
-        double val = sstats::__nlogn_median(list, size);
+        float val = sstats::__nlogn_median(list, size);
         free(list);
         return val;
     }
     sstats::MINMAX minmax = sstats::minmax(list, size);
-    double rnd =  ((double)rand())/(RAND_MAX+1.);
-    double pivot = rnd * (minmax.max-minmax.min) + minmax.min;
+    float rnd =  ((float)rand())/(RAND_MAX+1.);
+    float pivot = rnd * (minmax.max-minmax.min) + minmax.min;
 
-    double* lows   = new double[size];
-    double* pivots = new double[size];
-    double* highs  = new double[size];
+    float* lows   = new float[size];
+    float* pivots = new float[size];
+    float* highs  = new float[size];
     int low_size = 0;
     int piv_size = 0;
     int hig_size = 0;
@@ -141,7 +141,7 @@ double sstats::__quickselect(double* list, const int size, const int k){
       return sstats::__quickselect(lows, low_size, k);
     }
     else if (k < low_size+piv_size){
-        double ret = pivots[0];
+        float ret = pivots[0];
         free(highs);
         free(lows);
         free(pivots);
@@ -165,8 +165,8 @@ int sstats::__compare( const void* a, const void* b)
 }
 
 
-double sstats::__nlogn_median(double* list, const int size){
-  qsort(list, size, sizeof(double), sstats::__compare);
+float sstats::__nlogn_median(float* list, const int size){
+  qsort(list, size, sizeof(float), sstats::__compare);
 
   if (size % 2 == 1){
     return list[size/2];

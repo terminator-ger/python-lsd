@@ -28,15 +28,14 @@ int main(int argc, char** argv){
         cap.read(img_c);
         cv::resize(img_c, img_c, cv::Size(), 0.5, 0.5);
         cv::cvtColor(img_c, img_gray, cv::COLOR_RGB2GRAY);
-        img_gray.convertTo(img_d, CV_64F);
+        //img_gray.convertTo(img_d, CV_64F);
     
         //img /= 255.;
         //to raw array
         int h = img_gray.rows;
         int w = img_gray.cols;
-        lines_t* out = lsd_with_line_merge(img_d.ptr<double>(0), w, h);
-        std::cout << "Lines-v " << out->len_v << std::endl;
-        std::cout << "Lines-h " << out->len_h << std::endl;
+        lines_t* out = lsd_with_line_merge(img_gray.ptr<unsigned char>(0), w, h);
+        std::cout << "Lines " << out->len_v+out->len_h << std::endl;
 
         for (int i=0; i< out->len_v; ++i){
            cv::line(img_c, 
