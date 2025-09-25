@@ -29,10 +29,27 @@ liblsd.lsd_with_line_merge.restype = CT.POINTER(lines_t)
 liblsd.free_memory.argtypes = [CT.c_void_p]
 liblsd.free_memory.restype = None
 
-def lsd(img, x, y):
+def convert(img):
+    if isinstance(img, np.ndarray):
+        if img.shape[-1] == 3:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        if img.dtype == np.uint8:
+            img = img.astype(np.double)
+    return img
+
+def img_to_c(img):
+    y,x = img.shape
+    img_pix = (CT.c_double * (x*y))(*img.reshape(-1))
+    return img_pix, x, y
+    
+ 
+def lsd(img):
+    img = convert(img)
     n_out = CT.c_int() 
-    img_pix = (CT.c_double * len(img))(*img)
+    img_pix, x, y = img_to_c(img) 
+
     segs = liblsd.lsd(CT.byref(n_out), img_pix, x, y)
+
     ret = [(segs[7*i+0], 
                 segs[7*i+1], 
                 segs[7*i+2], 
@@ -44,11 +61,12 @@ def lsd(img, x, y):
     return ret
 
 
-def lsd_with_line_merge(img, x, y):
-    img_pix = (CT.c_double * len(img))(*img)
+def lsd_with_line_merge(img):
+    img = convert(img)
+    img_pix, x, y = img_to_c(img)
     segs = liblsd.lsd_with_line_merge(img_pix,
-                                     CT.c_int(x),
-                                     CT.c_int(y))
+                                     x,
+                                     y)
     w = 4
     lines_v = [(segs.contents.lines_v[w*i+0],
                 segs.contents.lines_v[w*i+1], 

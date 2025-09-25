@@ -2336,7 +2336,7 @@ void reduce_parallel(double (*lines)[4], int& n_out){
   double (*merged)[4] = new double[n_out][4];
   int i = 0;
   int matched = 0;
-  bool not_done [n_out] = {};
+  bool not_done [n_out];// = {false};
   for (i=0;i<n_out;++i){
     not_done[i] = true;
   }
@@ -2373,6 +2373,7 @@ void reduce_parallel(double (*lines)[4], int& n_out){
 
 }
 
+
 double* merge_lines_parallel(const double (*lines)[4], const int idx_a, const int idx_b){
   // merges lines on idx_a and idx_b into a new line located at idx_a
   // idx_b is free to use otherwise -> we do not cleanup here
@@ -2398,6 +2399,7 @@ double* merge_lines_parallel(const double (*lines)[4], const int idx_a, const in
   }
   return new_line;
 }
+
 
 double* cdist(double(*line)[4], const int size, const int x_a, const int y_a, const int x_b, const int y_b){
   image_double out = new_image_double(size, size);
@@ -2443,6 +2445,7 @@ double * calculate_pairwise_distances(double(*lines)[4], const int size){
   return dist;
 }
 
+
 double * get_angles(double(*lines)[4], const int size){
   double* angles = new double[size];
   for(int i=0; i<size; ++i){
@@ -2464,7 +2467,6 @@ double * get_angles(double(*lines)[4], const int size){
   }
   return angles;
 }
-
 
 
 lines_t* reduce_graph(double (*lines)[4], int& size){
@@ -2523,6 +2525,7 @@ lines_t* reduce_graph(double (*lines)[4], int& size){
   size = len_v+len_h;
   return new lines_t(reduced_v, reduced_h, len_v, len_h);
 }
+
 
 int reduce_lines(double (*lines)[4], const int len, double * dist, const int size, double(*reduced)[4], double thresh){
   std::vector<int> visited;
@@ -2603,7 +2606,6 @@ int reduce_lines(double (*lines)[4], const int len, double * dist, const int siz
   }
   return id;
 }
-
 
 
 int argmin(const double* dist, const int row, const int size){
@@ -2719,7 +2721,7 @@ lines_t* lsd_with_line_merge(double * img, int X, int Y){
                        nullptr,
                        0, 0);
   }
-  int* n_out = new int({0});
+  int* n_out = new int(0);
 
   #ifndef NDEBUG
     LD.setImg(img, Y, X);
